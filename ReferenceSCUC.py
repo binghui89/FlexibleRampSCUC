@@ -25,7 +25,7 @@ model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
 # INPUT DATA                                            #
 #=======================================================#
 
-data_path = '.../Data_Repository/'
+data_path = './'
 
 print('loading data ...')
 
@@ -35,7 +35,7 @@ gen_df = pd.read_csv(data_path+'generator_data_plexos_withRT.csv',index_col=0)
 Scaling Wind Generation to achieve different penetration levels
 """
 wind_penetration_wanted = 0.080 # 
-wind_penetration_current = sum(gen_df.loc[x ,'PMAX'] for x in gen_df.index if x.startswith('wind'))/ sum(gen_df['PMAX'])# 
+wind_penetration_current = sum(gen_df.loc[x ,'PMAX'] for x in gen_df.index if x.startswith('Wind'))/ sum(gen_df['PMAX'])# 
 wind_scaling_facor = wind_penetration_wanted * (1/wind_penetration_current -1)/(1-wind_penetration_wanted)   
 
 for x in gen_df.index:
