@@ -39,13 +39,13 @@ wind_penetration_current = sum(gen_df.loc[x ,'PMAX'] for x in gen_df.index if x.
 wind_scaling_facor = wind_penetration_wanted * (1/wind_penetration_current -1)/(1-wind_penetration_wanted)   
 
 for x in gen_df.index:
-    if x.startswith('wind'):
+    if x.startswith('Wind'):
         gen_df.loc[x ,'PMAX'] = wind_scaling_facor*gen_df.loc[x ,'PMAX']
     
 genfor_df = pd.read_csv(data_path+'generator.csv',index_col=0)
 
 for x in genfor_df.columns:
-    if x.startswith('wind'):
+    if x.startswith('Wind'):
         genfor_df.loc[:,x] = wind_scaling_facor*genfor_df.loc[:,x]
 
 genforren_df=pd.DataFrame()
@@ -66,7 +66,7 @@ ptdf_df = ptdf_df.loc[valid_id,:].copy()
 gen_df['STARTUP_RAMP']  = gen_df[['STARTUP_RAMP','PMIN']].max(axis=1)
 gen_df['SHUTDOWN_RAMP'] = gen_df[['SHUTDOWN_RAMP','PMIN']].max(axis=1)
 
-wind_generator_names  =  [x for x in gen_df.index if x.startswith('wind')]
+wind_generator_names  =  [x for x in gen_df.index if x.startswith('Wind')]
 
 genth_df = pd.DataFrame(gen_df[gen_df['GEN_TYPE']=='Thermal'])
 
