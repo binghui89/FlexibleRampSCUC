@@ -1,6 +1,6 @@
 from pyomo.pysp.scenariotree.manager import ScenarioTreeManagerClientSerial
 from pyomo.pysp.ef import create_ef_instance
-from ReferenceSCUC_abstract import *
+from ReferenceSCUC_dat import *
 
 # del model.TotalProductionCost
 # del model.TotalFixedCost
