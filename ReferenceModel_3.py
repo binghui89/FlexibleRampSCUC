@@ -1,27 +1,10 @@
 from pyomo.pysp.scenariotree.manager import ScenarioTreeManagerClientSerial
 from pyomo.pysp.ef import create_ef_instance
-from ReferenceSCUC import *
+from SCUC_RampConstraint_3 import *
 import os, pandas as pd
 from collections import defaultdict
 from matplotlib import pyplot as plt
 from IPython import embed as IP
-
-def extract_var_2dim(instance, varname):
-    # This function is used to extract variables indexed by 2-dim tuple with 
-    # the following format: (generator, time): value.
-    tmp_col = set()
-    tmp_var = getattr(instance, varname)
-    for k, v in tmp_var.iteritems():
-        gen, t = k
-        tmp_col.add(gen)
-    var = pd.DataFrame(
-        index=instance.TimePeriods.values(),
-        columns=list(tmp_col),
-    )
-    for k, v in tmp_var.iteritems():
-        gen, t = k
-        var.at[t, gen] = value(v)
-    return var
 
 def import_scenario_data():
     data_path = os.path.sep.join(
@@ -97,45 +80,68 @@ def import_scenario_data():
     print "Scenario data created!"
     return WindPowerForecast
 
-def scenario_data_118():
-    PowerForecastWind_w = import_scenario_data()
-    PowerForecastWind_W = dict()
-    W2w = {
-        'Wind 01': 'wind1',
-        'Wind 02': 'wind2',
-        'Wind 03': 'wind23',
-        'Wind 04': 'wind4',
-        'Wind 05': 'wind5',
-        'Wind 06': 'wind6',
-        'Wind 07': 'wind7',
-        'Wind 08': 'wind8',
-        'Wind 09': 'wind9',
-        'Wind 10': 'wind10',
-        'Wind 11': 'wind11',
-        'Wind 12': 'wind52',
-        'Wind 13': 'wind43',
-        'Wind 14': 'wind24',
-        'Wind 15': 'wind35',
-        'Wind 16': 'wind36',
-        'Wind 17': 'wind37',
-    }
-    for W in wind_generator_names:
-        w = W2w[W]
-        for s in PowerForecastWind_w:
-            if s not in PowerForecastWind_W:
-                PowerForecastWind_W[s] = dict()
-            for h in range(1, 25):
-                PowerForecastWind_W[s][W, h] = PowerForecastWind_w[s][w, h]
-    return PowerForecastWind_W
+# PowerForecast = dict()
+# scenarios = ['WindOffScenario', 'WindOnScenario']
+# for s in scenarios:
+#     if s == 'WindOnScenario':
+#         scenario_data = dict()
+#         for w in wind_generator_names:
+#             for t in range(1, 25):
+#                 scenario_data[w, t] = 1
+#         PowerForecast[s] = scenario_data
+#     elif s == 'WindOffScenario':
+#         scenario_data = dict()
+#         for w in wind_generator_names:
+#             for t in range(1, 25):
+#                 scenario_data[w, t] = 0
+#         PowerForecast[s] = scenario_data
+PowerForecast = import_scenario_data()
 
-PowerForecastWind = scenario_data_118()
+def extract_var_2dim(instance, varname):
+    # This function is used to extract variables indexed by 2-dim tuple with 
+    # the following format: (generator, time): value.
+    tmp_col = set()
+    tmp_var = getattr(instance, varname)
+    for k, v in tmp_var.iteritems():
+        gen, t = k
+        tmp_col.add(gen)
+    var = pd.DataFrame(
+        index=instance.TimePeriods.values(),
+        columns=list(tmp_col),
+    )
+    for k, v in tmp_var.iteritems():
+        gen, t = k
+        var.at[t, gen] = value(v)
+    return var
+
+def DummyStageCost_rule(model):
+    return model.DummyStageCost == 0
 
 def StageCost_rule(model, t):
-    expr = sum(
+    StageProductionCost = sum(
         model.ProductionCost[g, t]
-        + model.StartupCost[g, t]
-        + model.ShutdownCost[g, t]
         for g in model.ThermalGenerators
+    )
+    StageFixedCost = sum(
+        model.StartupCost[g, t] + model.ShutdownCost[g, t]
+        for g in model.ThermalGenerators
+    )
+    StageCurtailmentCost = sum(
+        model.BusVOLL[b] * model.BusCurtailment[b,t]
+        for b in model.LoadBuses
+    )
+    expr = (
+        StageProductionCost
+        + StageFixedCost
+        + StageCurtailmentCost
+        + model.RampingCost[t]
+        + 10000000*(
+            sum( model.MaxWindAvailable[g,t] for g in model.WindGenerators )
+            + model.SpinningReserveShortage[t]
+            + model.RegulatingReserveShortage[t]
+            + model.FlexibleRampDnShortage[t]
+            + model.FlexibleRampUpShortage[t]
+        )
     )
     return model.StageCost[t] == expr
 
@@ -145,21 +151,17 @@ def Objective_rule(model):
     )
     return expr
 
-def DummyStageCost_rule(model):
-    return model.DummyStageCost == 0
-
 def pysp_instance_creation_callback(scenario_name, node_names):
 
     instance = model.clone()
-    instance.PowerForecast.store_values(PowerForecastWind[scenario_name])
+    instance.PowerForecast.store_values(PowerForecast[scenario_name])
 
     return instance
 
-
-# del model.TotalProductionCost
-# del model.TotalFixedCost
 del model.TotalCostObjective
 
+# Because we have to define a first stage cost for runef/runph, here defines a 
+# dummy first stage cost, which always equals to 0
 model.DummyStageCost = Var( within=NonNegativeReals)
 model.DummyStageCostConstraint = Constraint( rule = DummyStageCost_rule )
 model.StageCost = Var(model.TimePeriods, within=NonNegativeReals)
@@ -169,41 +171,3 @@ model.TotalCostObjective = Objective(
     rule=Objective_rule,
     sense=minimize,
 )
-
-# if __name__ == "__main__":
-#     p_model = './ReferenceModel.py'
-#     p_data = './SP'
-#     options = ScenarioTreeManagerClientSerial.register_options()
-#     options.model_location = p_model
-#     options.scenario_tree_location = p_data
-#     results = defaultdict(list)
-#     varnames = [
-#         'PowerGenerated',
-#         'FlexibleRampUpAvailable',
-#         'FlexibleRampDnAvailable',
-#         'RegulatingReserveUpAvailable',
-#         'RegulatingReserveDnAvailable',
-#         'SpinningReserveUpAvailable',
-#         'UnitOn',
-#         'MaximumPowerAvailable',
-#     ]
-#     with ScenarioTreeManagerClientSerial(options) as manager:
-#         manager.initialize()
-#         ef_instance = create_ef_instance(manager.scenario_tree,
-#                                          verbose_output=options.verbose)
-#         with SolverFactory('cplex') as opt:
-#             ef_result = opt.solve(ef_instance)
-#         for s in manager.scenario_tree.scenarios:
-#             ins = s._instance
-#             for varname in varnames:
-#                 results[varname].append( extract_var_2dim(ins, varname) )
-
-#     plt.plot(
-#         results['PowerGenerated'][1].index, 
-#         results['PowerGenerated'][1]['Wind 01'],
-#         '-k*',
-#         results['PowerGenerated'][0].index,
-#         results['PowerGenerated'][0]['Wind 01'],
-#         '-b*',
-#     )
-#     plt.show()
