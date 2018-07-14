@@ -1,0 +1,312 @@
+set Stages := FirstStage SecondStage ;
+
+set Nodes := RootNode
+             Q10
+             Q20
+             Q30
+             Q40
+             Q50
+             Q60
+             Q70
+             Q80
+             Q90 ;
+
+param NodeStage := RootNode  FirstStage
+                   Q10       SecondStage
+                   Q20       SecondStage
+                   Q30       SecondStage
+                   Q40       SecondStage
+                   Q50       SecondStage
+                   Q60       SecondStage
+                   Q70       SecondStage
+                   Q80       SecondStage
+                   Q90       SecondStage ;
+
+set Children[RootNode] := Q10
+                          Q20
+                          Q30
+                          Q40
+                          Q50
+                          Q60
+                          Q70
+                          Q80
+                          Q90 ;
+
+param ConditionalProbability := RootNode      1.0
+                                Q10           0.111111111
+                                Q20           0.111111111
+                                Q30           0.111111111
+                                Q40           0.111111111
+                                Q50           0.111111111
+                                Q60           0.111111111
+                                Q70           0.111111111
+                                Q80           0.111111111
+                                Q90           0.111111111 ;
+
+set Scenarios := 
+            Q10Scenario
+            Q20Scenario
+            Q30Scenario
+            Q40Scenario
+            Q50Scenario
+            Q60Scenario
+            Q70Scenario
+            Q80Scenario
+            Q90Scenario ;
+
+param ScenarioLeafNode :=
+                    Q10Scenario  Q10
+                    Q20Scenario  Q20
+                    Q30Scenario  Q30
+                    Q40Scenario  Q40
+                    Q50Scenario  Q50
+                    Q60Scenario  Q60
+                    Q70Scenario  Q70
+                    Q80Scenario  Q80
+                    Q90Scenario  Q90 ;
+
+set StageVariables[FirstStage] :=  UnitOn[*, 1]
+                                   UnitOn[*, 2]
+                                   UnitOn[*, 3]
+                                   UnitOn[*, 4]
+                                   UnitOn[*, 5]
+                                   UnitOn[*, 6]
+                                   UnitOn[*, 7]
+                                   UnitOn[*, 8]
+                                   UnitOn[*, 9]
+                                   UnitOn[*, 10]
+                                   UnitOn[*, 11]
+                                   UnitOn[*, 12]
+                                   UnitOn[*, 13]
+                                   UnitOn[*, 14]
+                                   UnitOn[*, 15]
+                                   UnitOn[*, 16]
+                                   UnitOn[*, 17]
+                                   UnitOn[*, 18]
+                                   UnitOn[*, 19]
+                                   UnitOn[*, 20]
+                                   UnitOn[*, 21]
+                                   UnitOn[*, 22]
+                                   UnitOn[*, 23]
+                                   UnitOn[*, 24] ;
+
+set StageVariables[SecondStage] := FlexibleRampUpAvailable[*, 1]
+                                   FlexibleRampUpAvailable[*, 2]
+                                   FlexibleRampUpAvailable[*, 3]
+                                   FlexibleRampUpAvailable[*, 4]
+                                   FlexibleRampUpAvailable[*, 5]
+                                   FlexibleRampUpAvailable[*, 6]
+                                   FlexibleRampUpAvailable[*, 7]
+                                   FlexibleRampUpAvailable[*, 8]
+                                   FlexibleRampUpAvailable[*, 9]
+                                   FlexibleRampUpAvailable[*, 10]
+                                   FlexibleRampUpAvailable[*, 11]
+                                   FlexibleRampUpAvailable[*, 12]
+                                   FlexibleRampUpAvailable[*, 13]
+                                   FlexibleRampUpAvailable[*, 14]
+                                   FlexibleRampUpAvailable[*, 15]
+                                   FlexibleRampUpAvailable[*, 16]
+                                   FlexibleRampUpAvailable[*, 17]
+                                   FlexibleRampUpAvailable[*, 18]
+                                   FlexibleRampUpAvailable[*, 19]
+                                   FlexibleRampUpAvailable[*, 20]
+                                   FlexibleRampUpAvailable[*, 21]
+                                   FlexibleRampUpAvailable[*, 22]
+                                   FlexibleRampUpAvailable[*, 23]
+                                   FlexibleRampUpAvailable[*, 24]
+                                   FlexibleRampDnAvailable[*, 1]
+                                   FlexibleRampDnAvailable[*, 2]
+                                   FlexibleRampDnAvailable[*, 3]
+                                   FlexibleRampDnAvailable[*, 4]
+                                   FlexibleRampDnAvailable[*, 5]
+                                   FlexibleRampDnAvailable[*, 6]
+                                   FlexibleRampDnAvailable[*, 7]
+                                   FlexibleRampDnAvailable[*, 8]
+                                   FlexibleRampDnAvailable[*, 9]
+                                   FlexibleRampDnAvailable[*, 10]
+                                   FlexibleRampDnAvailable[*, 11]
+                                   FlexibleRampDnAvailable[*, 12]
+                                   FlexibleRampDnAvailable[*, 13]
+                                   FlexibleRampDnAvailable[*, 14]
+                                   FlexibleRampDnAvailable[*, 15]
+                                   FlexibleRampDnAvailable[*, 16]
+                                   FlexibleRampDnAvailable[*, 17]
+                                   FlexibleRampDnAvailable[*, 18]
+                                   FlexibleRampDnAvailable[*, 19]
+                                   FlexibleRampDnAvailable[*, 20]
+                                   FlexibleRampDnAvailable[*, 21]
+                                   FlexibleRampDnAvailable[*, 22]
+                                   FlexibleRampDnAvailable[*, 23]
+                                   FlexibleRampDnAvailable[*, 24]
+                                   RegulatingReserveUpAvailable[*, 1]
+                                   RegulatingReserveUpAvailable[*, 2]
+                                   RegulatingReserveUpAvailable[*, 3]
+                                   RegulatingReserveUpAvailable[*, 4]
+                                   RegulatingReserveUpAvailable[*, 5]
+                                   RegulatingReserveUpAvailable[*, 6]
+                                   RegulatingReserveUpAvailable[*, 7]
+                                   RegulatingReserveUpAvailable[*, 8]
+                                   RegulatingReserveUpAvailable[*, 9]
+                                   RegulatingReserveUpAvailable[*, 10]
+                                   RegulatingReserveUpAvailable[*, 11]
+                                   RegulatingReserveUpAvailable[*, 12]
+                                   RegulatingReserveUpAvailable[*, 13]
+                                   RegulatingReserveUpAvailable[*, 14]
+                                   RegulatingReserveUpAvailable[*, 15]
+                                   RegulatingReserveUpAvailable[*, 16]
+                                   RegulatingReserveUpAvailable[*, 17]
+                                   RegulatingReserveUpAvailable[*, 18]
+                                   RegulatingReserveUpAvailable[*, 19]
+                                   RegulatingReserveUpAvailable[*, 20]
+                                   RegulatingReserveUpAvailable[*, 21]
+                                   RegulatingReserveUpAvailable[*, 22]
+                                   RegulatingReserveUpAvailable[*, 23]
+                                   RegulatingReserveUpAvailable[*, 24]
+                                   RegulatingReserveDnAvailable[*, 1]
+                                   RegulatingReserveDnAvailable[*, 2]
+                                   RegulatingReserveDnAvailable[*, 3]
+                                   RegulatingReserveDnAvailable[*, 4]
+                                   RegulatingReserveDnAvailable[*, 5]
+                                   RegulatingReserveDnAvailable[*, 6]
+                                   RegulatingReserveDnAvailable[*, 7]
+                                   RegulatingReserveDnAvailable[*, 8]
+                                   RegulatingReserveDnAvailable[*, 9]
+                                   RegulatingReserveDnAvailable[*, 10]
+                                   RegulatingReserveDnAvailable[*, 11]
+                                   RegulatingReserveDnAvailable[*, 12]
+                                   RegulatingReserveDnAvailable[*, 13]
+                                   RegulatingReserveDnAvailable[*, 14]
+                                   RegulatingReserveDnAvailable[*, 15]
+                                   RegulatingReserveDnAvailable[*, 16]
+                                   RegulatingReserveDnAvailable[*, 17]
+                                   RegulatingReserveDnAvailable[*, 18]
+                                   RegulatingReserveDnAvailable[*, 19]
+                                   RegulatingReserveDnAvailable[*, 20]
+                                   RegulatingReserveDnAvailable[*, 21]
+                                   RegulatingReserveDnAvailable[*, 22]
+                                   RegulatingReserveDnAvailable[*, 23]
+                                   RegulatingReserveDnAvailable[*, 24]
+                                   SpinningReserveUpAvailable[*, 1]
+                                   SpinningReserveUpAvailable[*, 2]
+                                   SpinningReserveUpAvailable[*, 3]
+                                   SpinningReserveUpAvailable[*, 4]
+                                   SpinningReserveUpAvailable[*, 5]
+                                   SpinningReserveUpAvailable[*, 6]
+                                   SpinningReserveUpAvailable[*, 7]
+                                   SpinningReserveUpAvailable[*, 8]
+                                   SpinningReserveUpAvailable[*, 9]
+                                   SpinningReserveUpAvailable[*, 10]
+                                   SpinningReserveUpAvailable[*, 11]
+                                   SpinningReserveUpAvailable[*, 12]
+                                   SpinningReserveUpAvailable[*, 13]
+                                   SpinningReserveUpAvailable[*, 14]
+                                   SpinningReserveUpAvailable[*, 15]
+                                   SpinningReserveUpAvailable[*, 16]
+                                   SpinningReserveUpAvailable[*, 17]
+                                   SpinningReserveUpAvailable[*, 18]
+                                   SpinningReserveUpAvailable[*, 19]
+                                   SpinningReserveUpAvailable[*, 20]
+                                   SpinningReserveUpAvailable[*, 21]
+                                   SpinningReserveUpAvailable[*, 22]
+                                   SpinningReserveUpAvailable[*, 23]
+                                   SpinningReserveUpAvailable[*, 24]
+                                   PowerGenerated[*, 1]
+                                   PowerGenerated[*, 2]
+                                   PowerGenerated[*, 3]
+                                   PowerGenerated[*, 4]
+                                   PowerGenerated[*, 5]
+                                   PowerGenerated[*, 6]
+                                   PowerGenerated[*, 7]
+                                   PowerGenerated[*, 8]
+                                   PowerGenerated[*, 9]
+                                   PowerGenerated[*, 10]
+                                   PowerGenerated[*, 11]
+                                   PowerGenerated[*, 12]
+                                   PowerGenerated[*, 13]
+                                   PowerGenerated[*, 14]
+                                   PowerGenerated[*, 15]
+                                   PowerGenerated[*, 16]
+                                   PowerGenerated[*, 17]
+                                   PowerGenerated[*, 18]
+                                   PowerGenerated[*, 19]
+                                   PowerGenerated[*, 20]
+                                   PowerGenerated[*, 21]
+                                   PowerGenerated[*, 22]
+                                   PowerGenerated[*, 23]
+                                   PowerGenerated[*, 24]
+                                   BlockPowerGenerated[*, *, 1]
+                                   BlockPowerGenerated[*, *, 2]
+                                   BlockPowerGenerated[*, *, 3]
+                                   BlockPowerGenerated[*, *, 4]
+                                   BlockPowerGenerated[*, *, 5]
+                                   BlockPowerGenerated[*, *, 6]
+                                   BlockPowerGenerated[*, *, 7]
+                                   BlockPowerGenerated[*, *, 8]
+                                   BlockPowerGenerated[*, *, 9]
+                                   BlockPowerGenerated[*, *, 10]
+                                   BlockPowerGenerated[*, *, 11]
+                                   BlockPowerGenerated[*, *, 12]
+                                   BlockPowerGenerated[*, *, 13]
+                                   BlockPowerGenerated[*, *, 14]
+                                   BlockPowerGenerated[*, *, 15]
+                                   BlockPowerGenerated[*, *, 16]
+                                   BlockPowerGenerated[*, *, 17]
+                                   BlockPowerGenerated[*, *, 18]
+                                   BlockPowerGenerated[*, *, 19]
+                                   BlockPowerGenerated[*, *, 20]
+                                   BlockPowerGenerated[*, *, 21]
+                                   BlockPowerGenerated[*, *, 22]
+                                   BlockPowerGenerated[*, *, 23]
+                                   BlockPowerGenerated[*, *, 24]
+                                   MaximumPowerAvailable[*, 1]
+                                   MaximumPowerAvailable[*, 2]
+                                   MaximumPowerAvailable[*, 3]
+                                   MaximumPowerAvailable[*, 4]
+                                   MaximumPowerAvailable[*, 5]
+                                   MaximumPowerAvailable[*, 6]
+                                   MaximumPowerAvailable[*, 7]
+                                   MaximumPowerAvailable[*, 8]
+                                   MaximumPowerAvailable[*, 9]
+                                   MaximumPowerAvailable[*, 10]
+                                   MaximumPowerAvailable[*, 11]
+                                   MaximumPowerAvailable[*, 12]
+                                   MaximumPowerAvailable[*, 13]
+                                   MaximumPowerAvailable[*, 14]
+                                   MaximumPowerAvailable[*, 15]
+                                   MaximumPowerAvailable[*, 16]
+                                   MaximumPowerAvailable[*, 17]
+                                   MaximumPowerAvailable[*, 18]
+                                   MaximumPowerAvailable[*, 19]
+                                   MaximumPowerAvailable[*, 20]
+                                   MaximumPowerAvailable[*, 21]
+                                   MaximumPowerAvailable[*, 22]
+                                   MaximumPowerAvailable[*, 23]
+                                   MaximumPowerAvailable[*, 24] ;
+
+param StageCost :=
+    FirstStage  DummyStageCost
+    SecondStage StageCost[1]
+    SecondStage StageCost[2]
+    SecondStage StageCost[3]
+    SecondStage StageCost[4]
+    SecondStage StageCost[5]
+    SecondStage StageCost[6]
+    SecondStage StageCost[7]
+    SecondStage StageCost[8]
+    SecondStage StageCost[9]
+    SecondStage StageCost[10]
+    SecondStage StageCost[11]
+    SecondStage StageCost[12]
+    SecondStage StageCost[13]
+    SecondStage StageCost[14]
+    SecondStage StageCost[15]
+    SecondStage StageCost[16]
+    SecondStage StageCost[17]
+    SecondStage StageCost[18]
+    SecondStage StageCost[19]
+    SecondStage StageCost[20]
+    SecondStage StageCost[21]
+    SecondStage StageCost[22]
+    SecondStage StageCost[23]
+    SecondStage StageCost[24]
+;

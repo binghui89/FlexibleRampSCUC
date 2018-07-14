@@ -15,7 +15,7 @@ import pandas as pd
 import numpy as np
 from pyomo.environ import *
 from pyomo.opt import SolverFactory
-model = AbstractModel()
+model = ConcreteModel()
 model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
 
 
@@ -257,7 +257,7 @@ model.BusDemand = Param(model.LoadBuses, model.TimePeriods, within=NonNegativeRe
 
 # Power forecasts
 
-model.PowerForecast = Param(model.NonThermalGenerators, model.TimePeriods, within=NonNegativeReals, initialize=genforren_dict)
+model.PowerForecast = Param(model.NonThermalGenerators, model.TimePeriods, within=NonNegativeReals, initialize=genforren_dict, mutable=True)
 
 ##################################################################
 # the global system reserve, for each time period. units are MW. #
@@ -336,7 +336,7 @@ def t0_state_nonzero_validator(m, v, g):
 model.UnitOnT0State = Param(model.ThermalGenerators, within=Integers, validate=t0_state_nonzero_validator, initialize=genth_df['GEN_STATUS'].to_dict())
 
 def t0_unit_on_rule(m, g):
-    return value(m.UnitOnT0State[g]) >= 1
+    return int( value(m.UnitOnT0State[g]) >= 1 )
 
 model.UnitOnT0 = Param(model.ThermalGenerators, within=Binary, initialize=t0_unit_on_rule)
 
