@@ -97,23 +97,6 @@ def import_scenario_data():
 #         PowerForecast[s] = scenario_data
 PowerForecast = import_scenario_data()
 
-def extract_var_2dim(instance, varname):
-    # This function is used to extract variables indexed by 2-dim tuple with 
-    # the following format: (generator, time): value.
-    tmp_col = set()
-    tmp_var = getattr(instance, varname)
-    for k, v in tmp_var.iteritems():
-        gen, t = k
-        tmp_col.add(gen)
-    var = pd.DataFrame(
-        index=instance.TimePeriods.values(),
-        columns=list(tmp_col),
-    )
-    for k, v in tmp_var.iteritems():
-        gen, t = k
-        var.at[t, gen] = value(v)
-    return var
-
 def DummyStageCost_rule(model):
     return model.DummyStageCost == 0
 

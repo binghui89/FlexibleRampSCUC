@@ -6,23 +6,6 @@ from collections import defaultdict
 from matplotlib import pyplot as plt
 from IPython import embed as IP
 
-def extract_var_2dim(instance, varname):
-    # This function is used to extract variables indexed by 2-dim tuple with 
-    # the following format: (generator, time): value.
-    tmp_col = set()
-    tmp_var = getattr(instance, varname)
-    for k, v in tmp_var.iteritems():
-        gen, t = k
-        tmp_col.add(gen)
-    var = pd.DataFrame(
-        index=instance.TimePeriods.values(),
-        columns=list(tmp_col),
-    )
-    for k, v in tmp_var.iteritems():
-        gen, t = k
-        var.at[t, gen] = value(v)
-    return var
-
 def import_scenario_data():
     data_path = os.path.sep.join(
         ['.', 'TEXAS2k_B']
