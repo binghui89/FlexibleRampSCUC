@@ -1,5 +1,17 @@
 import os, pandas as pd
 from pyomo.environ import *
+from matplotlib import gridspec, pyplot as plt
+from IPython import embed as IP
+
+color_map = {
+    'Natural gas': [0.7, 0.7, 0.7],
+    'Coal':        [0.0, 0.0, 0.0],
+    'Nuclear':     [0.6, 0.0, 0.8],
+    'Solar':       [1.0, 1.0, 0.0],
+    'Wind':        [0.0, 0.0, 1.0],
+    'Hydro':       [0.4, 0.6, 0.9],
+    }
+
 
 def extract_var_2dim(instance, varname):
     # This function is used to extract variables indexed by 2-dim tuple with 
@@ -103,3 +115,94 @@ def store_csvs(instance, dirwork = None):
     ]
     
     os.chdir(dirhome)
+
+def plot_power(ax, df_power_by_type, title=None):
+    b = [0]*df_power_by_type.index.size
+    handles = list()
+    for i in df_power_by_type.columns:
+        h = ax.fill_between(
+            df_power_by_type.index,
+            b,
+            b+df_power_by_type[i]/1E3, # Convert to GW
+            facecolor=color_map[i],
+        )
+        handles.append(h)
+        b += df_power_by_type[i]/1E3
+    ymax = max(b) - int( max(b) )%10 + 20
+    ax.set_xlim([1, df_power_by_type.index.size])
+    ax.set_ylim([0, ymax])
+    # ax.set_xlabel('Time (h)')
+    # ax.set_ylabel('Power (GW)')
+    if title:
+        ax.annotate(
+            title,
+            xy=(0.25, 0.9), xycoords='axes fraction',
+            xytext=(.25, .9), textcoords='axes fraction',
+            fontsize=10,
+        )
+    return handles, df_power_by_type.columns
+
+def calculate_power_by_type(csvname):
+    # csvname = 'PowerGenerated.csv'
+    df_power_by_gen = pd.read_csv(csvname, index_col=0)
+    resource_types = [
+        'Natural gas',
+        'Coal',
+        'Nuclear',
+        'Hydro',
+        'Wind',
+        'Solar',
+    ]
+    col = dict()
+    col['Natural gas'] = [i for i in df_power_by_gen.columns if i.startswith('ng')]
+    col['Coal']        = [i for i in df_power_by_gen.columns if i.startswith('coal')]
+    col['Nuclear']     = [i for i in df_power_by_gen.columns if i.startswith('nuclear')]
+    col['Hydro']       = [i for i in df_power_by_gen.columns if i.startswith('wind')]
+    col['Wind']        = [i for i in df_power_by_gen.columns if i.startswith('solar')]
+    col['Solar']       = [i for i in df_power_by_gen.columns if i.startswith('hydro')]
+    dict_of_series = dict()
+    for r in resource_types:
+        dict_of_series[r] = df_power_by_gen[ col[r] ].sum(axis=1)
+    df_power_by_type = pd.DataFrame( dict_of_series )
+    return df_power_by_type
+
+if __name__ == "__main__":
+    dir_data = "C:\\Users\\bxl180002\\Downloads\\results_10scenario_independent"
+    scenarios = [
+        "Q10Scenario",
+        "Q20Scenario",
+        "Q30Scenario",
+        "Q40Scenario",
+        "Q50Scenario",
+        "Q60Scenario",
+        "Q70Scenario",
+        "Q80Scenario",
+        "Q90Scenario",
+    ]
+    fig = plt.figure(figsize=(6, 8), dpi=80, facecolor='w', edgecolor='k')
+    gs = gridspec.GridSpec(3, 3, hspace=0.05, wspace=0.05)
+    for s in scenarios:
+        csvname = os.path.sep.join([dir_data, s, 'PowerGenerated.csv'])
+        df_power_by_type = calculate_power_by_type(csvname)
+        # fig = plt.figure()
+        # ax = plt.subplot(111)
+        ax = plt.subplot( gs[scenarios.index(s)] )
+        handles, names = plot_power(ax, df_power_by_type, title=s)
+        if scenarios.index(s)%3 == 0:
+            ax.set_ylabel('Power (GW)')
+        else:
+            plt.setp(ax.get_yticklabels(), visible=False)
+        if scenarios.index(s)>5:
+            ax.set_xlabel('Time (h)')
+        else:
+            plt.setp(ax.get_xticklabels(), visible=False)
+    plt.subplots_adjust(left=0.10, right=0.90, top=0.99, bottom=0.15)
+    fig.legend(
+            handles, names, 
+            loc='lower center', 
+            ncol=len(names)/2, 
+            bbox_to_anchor=(0.5, 0.02),
+            edgecolor=None
+        )
+
+    plt.show()
