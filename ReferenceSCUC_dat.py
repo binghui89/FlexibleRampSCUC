@@ -25,7 +25,7 @@ model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
 # INPUT DATA                                            #
 #=======================================================#
 
-data_path = './'
+data_path = './118bus/'
 
 print('loading data ...')
 
