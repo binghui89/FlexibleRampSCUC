@@ -2738,30 +2738,27 @@ def enforce_max_available_ramp_up_rates_rule(m, g, t):
     #                                    degenerate upper bound due to unit off)
     # (1, 1) - unit staying on:    RHS = standard ramp limit
     if t == 1: # Maybe we can use m.TimePeriod.first() here
-        LHS = (
-            m.MaximumPowerAvailable[g, t]
-            - m.RegulatingReserveUpAvailable[g, t] 
-            - m.SpinningReserveUpAvailable[g, t]
-        )
-        RHS = (
-            m.PowerGeneratedT0[g]
-            + m.NominalRampUpLimit[g]*m.UnitOnT0[g]
-            + m.StartupRampLimit[g]*(m.UnitOn[g, t] - m.UnitOnT0[g])
-            + m.MaximumPowerOutput[g]*(1 - m.UnitOn[g, t])
+        return (
+            m.MaximumPowerAvailable[g, t] 
+            - m.RegulatingReserveUpAvailable[g,t] 
+            - m.SpinningReserveUpAvailable[g,t]
+        ) <= (
+            m.PowerGeneratedT0[g] 
+            + m.NominalRampUpLimit[g] * m.UnitOnT0[g] 
+            + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOnT0[g]) 
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
         )
     else:
-        LHS = (
+        return (
             m.MaximumPowerAvailable[g, t] 
-            - m.RegulatingReserveUpAvailable[g, t] 
-            - m.SpinningReserveUpAvailable[g, t]
+            - m.RegulatingReserveUpAvailable[g,t] 
+            - m.SpinningReserveUpAvailable[g,t]
+        ) <= (
+            m.PowerGenerated[g, t-1] 
+            + m.NominalRampUpLimit[g] * m.UnitOn[g, t-1] 
+            + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, t-1]) 
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
         )
-        RHS = (
-            m.PowerGenerated[g, t - 1] 
-            + m.NominalRampUpLimit[g]*m.UnitOn[g, t - 1] 
-            + m.StartupRampLimit[g]*(m.UnitOn[g, t] - m.UnitOn[g, t-1]) 
-            + m.MaximumPowerOutput[g]*(1 - m.UnitOn[g, t])
-        )
-    return LHS <= RHS
 
 model.EnforceMaxAvailableRampUpRates = Constraint(
     model.ThermalGenerators, model.TimePeriods, 
@@ -2782,11 +2779,15 @@ def enforce_max_available_ramp_down_rates_rule(m, g, t):
     if t == value(m.NumTimePeriods): # Maybe we can use m.TimePeriod.last() here
         return Constraint.Skip
     else:
-        RHS = (
-            m.MaximumPowerOutput[g]*m.UnitOn[g, t+1] 
-            + m.ShutdownRampLimit[g]*(m.UnitOn[g, t] - m.UnitOn[g, t+1])
+        # RHS = (
+        #     m.MaximumPowerOutput[g]*m.UnitOn[g, t+1] 
+        #     + m.ShutdownRampLimit[g]*(m.UnitOn[g, t] - m.UnitOn[g, t+1])
+        # )
+        # return m.MaximumPowerAvailable[g, t] <= RHS
+        return m.MaximumPowerAvailable[g, t] <= (
+            m.MaximumPowerOutput[g] * m.UnitOn[g, t+1] 
+            + m.ShutdownRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, t+1])
         )
-        return m.MaximumPowerAvailable[g, t] <= RHS
 
 model.EnforceMaxAvailableRampDownRates = Constraint(
     model.ThermalGenerators, model.TimePeriods, 
@@ -2806,28 +2807,25 @@ def enforce_ramp_down_limits_rule(m, g, t):
     # (1, 0) - unit switching off: RHS = shutdown ramp limit 
     # (1, 1) - unit staying on:    RHS = standard ramp-down limit 
     if t == 1:
-        LHS = (
+        return (
             m.PowerGeneratedT0[g] 
             - m.PowerGenerated[g, t] 
             - m.RegulatingReserveDnAvailable[g,t]
-        )
-        RHS = (
-            m.NominalRampDownLimit[g]*m.UnitOn[g, t] 
-            + m.ShutdownRampLimit[g]*(m.UnitOnT0[g] - m.UnitOn[g, t]) 
+        ) <= (
+            m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
+            + m.ShutdownRampLimit[g] * (m.UnitOnT0[g] - m.UnitOn[g, t]) 
             + m.MaximumPowerOutput[g] * (1 - m.UnitOnT0[g])
         )
     else:
-        LHS = (
+        return (
             m.PowerGenerated[g, t-1] 
             - m.PowerGenerated[g, t] 
             - m.RegulatingReserveDnAvailable[g,t]
-        )
-        RHS = (
+        ) <= (
             m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
             + m.ShutdownRampLimit[g] * (m.UnitOn[g, t-1] - m.UnitOn[g, t]) 
             + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t-1])
         )
-    return LHS <= RHS
 
 model.EnforceNominalRampDownLimits = Constraint(
     model.ThermalGenerators, model.TimePeriods, 
@@ -2927,28 +2925,27 @@ model.ComputeTotalCurtailmentCost = Constraint(rule=compute_total_curtailment_co
 
 print('Building network constraints ...')
 
-def enforce_line_capacity_limits_rule_a(m, l, t):
-    inject = sum(
+def line_flow_rule(m, l, t):
+    # This is an expression of the power flow on bus b in time t, defined here
+    # to save time.
+    return sum(
         ptdf_dict[l][m.GenBuses[g]]*m.PowerGenerated[g,t] 
         for g in m.AllGenerators
-    ) 
-    drawn = sum(
+    ) - sum(
         ptdf_dict[l][b]*(m.BusDemand[b,t] - m.BusCurtailment[b,t]) 
         for b in m.LoadBuses
     )
-    return inject - drawn <= m.LineLimits[l]
+
+def enforce_line_capacity_limits_rule_a(m, l, t):
+    return m.LineFlow[l, t] <= m.LineLimits[l]
 
 def enforce_line_capacity_limits_rule_b(m, l, t):
-    inject = sum(
-        ptdf_dict[l][m.GenBuses[g]]*m.PowerGenerated[g,t] 
-        for g in m.AllGenerators
-    )
-    drawn = sum(
-        ptdf_dict[l][b]*(m.BusDemand[b,t] - m.BusCurtailment[b,t]) 
-        for b in m.LoadBuses
-    )
-    return inject - drawn >= -m.LineLimits[l]
+    return m.LineFlow[l, t] >= -m.LineLimits[l]
 
+model.LineFlow = Expression(
+    model.EnforcedBranches, model.TimePeriods,
+    rule=line_flow_rule
+)
 model.EnforceLineCapacityLimitsA = Constraint(
     model.EnforcedBranches, model.TimePeriods, 
     rule=enforce_line_capacity_limits_rule_a
@@ -2988,20 +2985,17 @@ def enforce_up_time_constraints_subsequent(m, g, t):
         # in time (t - 1) but on in time t, and the value is the minimum number 
         # of subsequent consecutive time periods that the unit must be on.
         if t is 1:
-            LHS = sum(
+            return sum(
                 m.UnitOn[g, n] 
                 for n in m.TimePeriods 
                 if n >= t and n <= t + value(m.MinimumUpTime[g]) - 1
-            )
-            RHS = m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOnT0[g])
+            ) >= m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOnT0[g])
         else:
-            LHS = sum(
+            return sum(
                 m.UnitOn[g, n] 
                 for n in m.TimePeriods 
-                if n >= t and n <= (t + value(m.MinimumUpTime[g]) - 1)
-            )
-            RHS = m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOn[g, t-1])
-        return LHS >= RHS
+                if n >= t and n <= t + value(m.MinimumUpTime[g]) - 1
+            ) >= m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOn[g, t-1])
     else:
         # Handle the final (MinimumUpTime[g] - 1) time periods - if a unit is 
         # started up in this interval, it must remain on-line until the end of 
@@ -3051,20 +3045,17 @@ def enforce_down_time_constraints_subsequent(m, g, t):
         # in time (t - 1) but on in time, and the value is the minimum number of 
         # subsequent consecutive time periods that the unit must be on.
         if t is 1:
-            LHS = sum(
+            return sum(
                 1 - m.UnitOn[g, n]
                 for n in m.TimePeriods 
-                if n >= t and n <= (t + value(m.MinimumDownTime[g]) - 1)
-            )
-            RHS = m.MinimumDownTime[g] * (m.UnitOnT0[g] - m.UnitOn[g, t])
+                if n >= t and n <= t + value(m.MinimumDownTime[g]) - 1
+            ) >= m.MinimumDownTime[g] * (m.UnitOnT0[g] - m.UnitOn[g, t])
         else:
-            LHS = sum(
+            return sum(
                 1 - m.UnitOn[g, n] 
                 for n in m.TimePeriods 
-                if n >= t and n <= (t + value(m.MinimumDownTime[g]) - 1)
-            )
-            RHS = m.MinimumDownTime[g] * (m.UnitOn[g, t-1] - m.UnitOn[g, t])
-        return LHS >= RHS
+                if n >= t and n <= t + value(m.MinimumDownTime[g]) - 1
+            ) >= m.MinimumDownTime[g] * (m.UnitOn[g, t-1] - m.UnitOn[g, t])
     else:
         # handle the final (MinimumDownTime[g] - 1) time periods - if a unit is 
         # shut down in this interval, it must remain off-line until the end of 
