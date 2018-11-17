@@ -2108,9 +2108,9 @@ bus_name = [
 kV_level = 230
 bus_kVlevel_set    = list(bus_df[bus_df['BASEKV']>=kV_level].index)
 branch_kVlevel_set = [
-    i
-    for i in branch_df.index
-    if branch_df.loc[i,'F_BUS'] in bus_kVlevel_set and branch_df.loc[i,'T_BUS'] in bus_kVlevel_set
+    i for i in branch_df.index
+    if branch_df.loc[i,'F_BUS'] in bus_kVlevel_set 
+    and branch_df.loc[i,'T_BUS'] in bus_kVlevel_set
 ]
 valid_id = branch_kVlevel_set
 ptdf_df = pd.read_csv(data_path+'ptdf.csv',index_col=0) # for case 118
@@ -2833,93 +2833,6 @@ model.EnforceNominalRampDownLimits = Constraint(
 )
 
 #############################################
-# constraints for computing cost components #
-#############################################
-#---------------------------------------
-
-# Compute the per-generator, per-time period production costs. this is a 
-# "simple" piecewise linear construct. the first argument to piecewise is the 
-# index set. the second and third arguments are respectively the input and 
-# output variables. 
-"""
-model.ComputeProductionCosts = Piecewise(
-    model.ThermalGenerators * model.TimePeriods, model.ProductionCost, model.PowerGenerated, 
-    pw_pts=model.PowerGenerationPiecewisePoints, 
-    f_rule=production_cost_function, pw_constr_type='LB'
-)
-"""
-
-# New ADDITION
-# def production_cost_function(m, g, t):
-#     return m.ProductionCost[g,t] == value(m.ProductionCostA1[g])*(m.PowerGenerated[g,t])
-# model.ComputeProductionCost = Constraint()
-
-# Production cost, per gen per time slice
-def production_cost_function(m, g, t):
-    return m.ProductionCost[g,t] == (
-        m.UnitOn[g,t]*margcost_df.loc[g,'nlcost']
-        + sum(
-            value(m.BlockMarginalCost[g,k])*(m.BlockPowerGenerated[g,k,t]) 
-            for k in m.Blocks
-        )
-    )
-
-# Compute the total production costs, across all generators and time periods.
-def compute_total_production_cost_rule(m):
-   return m.TotalProductionCost == sum(
-       m.ProductionCost[g, t] 
-       for g in m.ThermalGenerators 
-       for t in m.TimePeriods
-   )
-
-model.ComputeProductionCost = Constraint(
-    model.ThermalGenerators, model.TimePeriods, 
-    rule=production_cost_function
-)
-model.ComputeTotalProductionCost = Constraint(rule=compute_total_production_cost_rule)
-
-# Compute the per-generator, per-time period shut-down and start-up costs.
-def compute_shutdown_costs_rule(m, g, t):
-   if t is 1: # Maybe replace with .first()
-      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (m.UnitOnT0[g] - m.UnitOn[g, t])
-   else:
-      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (m.UnitOn[g, t-1] - m.UnitOn[g, t])
-
-def compute_startup_costs_rule(m, g, t):
-   if t is 1: # Maybe replace with .first()
-      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (-m.UnitOnT0[g] + m.UnitOn[g, t])
-   else:
-      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (-m.UnitOn[g, t-1] + m.UnitOn[g, t])
-
-# Compute the total startup and shutdown costs, across all generators and time periods.
-def compute_total_fixed_cost_rule(m):
-   return m.TotalFixedCost == sum(
-       m.StartupCost[g, t] + m.ShutdownCost[g, t]
-       for g in m.ThermalGenerators 
-       for t in m.TimePeriods
-   )
-
-model.ComputeStartupCosts = Constraint(
-    model.ThermalGenerators, model.TimePeriods, 
-    rule=compute_startup_costs_rule
-)
-model.ComputeShutdownCosts = Constraint(
-    model.ThermalGenerators, model.TimePeriods, 
-    rule=compute_shutdown_costs_rule
-)
-model.ComputeTotalFixedCost = Constraint(rule=compute_total_fixed_cost_rule)
-
-# Compute the total load curtailment cost
-def compute_total_curtailment_cost_rule(m):
-    return m.TotalCurtailmentCost == sum(
-        m.BusVOLL[b] * m.BusCurtailment[b,t]
-        for b in m.LoadBuses 
-        for t in m.TimePeriods
-    )
-
-model.ComputeTotalCurtailmentCost = Constraint(rule=compute_total_curtailment_cost_rule)
-
-#############################################
 # constraints for line capacity limits
 #############################################
 
@@ -3213,32 +3126,104 @@ model.EnforceRegulatingUpReserveRequirements = Constraint(model.TimePeriods, rul
 model.EnforceRegulatingDnReserveRequirements = Constraint(model.TimePeriods, rule=enforce_regulating_down_reserve_requirement_rule)  
 model.EnforceRegulationUpRates = Constraint(model.ThermalGenerators, model.TimePeriods, rule=enforce_regulating_up_reserve_limit)  
 model.EnforceRegulationDnRates = Constraint(model.ThermalGenerators, model.TimePeriods, rule=enforce_regulating_down_reserve_limit)    
-#------------------------------------------------------
-# Reserve and Ramp Shortage Limit Constraints
-# def enforce_spinning_reserve_shortage_limits(m, t):
-#     return m.SpinningReserveRequirement[t] - m.SpinningReserveShortage[t] >=0
 
-# def enforce_regulating_reserve_shortage_limits(m, t):
-#     return m.RegulatingReserveRequirement[t] - m.RegulatingReserveShortage[t] >=0
+#############################################
+# constraints for computing cost components #
+#############################################
+#---------------------------------------
 
-# def enforce_flexible_up_ramp_shortage_limits(m, t):
-#     return m.FlexibleRampUpRequirement[t] - m.FlexibleRampUpShortage[t] >=0
+# Compute the per-generator, per-time period production costs. this is a 
+# "simple" piecewise linear construct. the first argument to piecewise is the 
+# index set. the second and third arguments are respectively the input and 
+# output variables. 
+"""
+model.ComputeProductionCosts = Piecewise(
+    model.ThermalGenerators * model.TimePeriods, model.ProductionCost, model.PowerGenerated, 
+    pw_pts=model.PowerGenerationPiecewisePoints, 
+    f_rule=production_cost_function, pw_constr_type='LB'
+)
+"""
 
-# def enforce_flexible_down_ramp_shortage_limits(m, t):
-#     return m.FlexibleRampDnRequirement[t] - m.FlexibleRampDnShortage[t] >=0
+# New ADDITION
+# def production_cost_function(m, g, t):
+#     return m.ProductionCost[g,t] == value(m.ProductionCostA1[g])*(m.PowerGenerated[g,t])
+# model.ComputeProductionCost = Constraint()
 
-#model.EnforceSpinningReserveShortageLimits = Constraint(model.TimePeriods, rule=enforce_spinning_reserve_shortage_limits)
-#model.EnforceRegulatingReserveShortageLimits = Constraint(model.TimePeriods, rule=enforce_regulating_reserve_shortage_limits)
-#model.EnforceFlexibleRampUpShortageLimits = Constraint(model.TimePeriods, rule=enforce_flexible_up_ramp_shortage_limits)
-#model.EnforceFlexibleRampDnShortageLimits = Constraint(model.TimePeriods, rule=enforce_flexible_down_ramp_shortage_limits)
-#
-#-------------------------------------------------------------
-#Ramping Cost
+# Production cost, per gen per time slice
+def production_cost_function(m, g, t):
+    return m.ProductionCost[g,t] == (
+        m.UnitOn[g,t]*margcost_df.loc[g,'nlcost']
+        + sum(
+            value(m.BlockMarginalCost[g,k])*(m.BlockPowerGenerated[g,k,t]) 
+            for k in m.Blocks
+        )
+    )
+
+# Compute the total production costs, across all generators and time periods.
+def compute_total_production_cost_rule(m):
+   return m.TotalProductionCost == sum(
+       m.ProductionCost[g, t] 
+       for g in m.ThermalGenerators 
+       for t in m.TimePeriods
+   )
+
+model.ComputeProductionCost = Constraint(
+    model.ThermalGenerators, model.TimePeriods, 
+    rule=production_cost_function
+)
+model.ComputeTotalProductionCost = Constraint(rule=compute_total_production_cost_rule)
+
+# Compute the per-generator, per-time period shut-down and start-up costs.
+def compute_shutdown_costs_rule(m, g, t):
+   if t is 1: # Maybe replace with .first()
+      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (m.UnitOnT0[g] - m.UnitOn[g, t])
+   else:
+      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (m.UnitOn[g, t-1] - m.UnitOn[g, t])
+
+def compute_startup_costs_rule(m, g, t):
+   if t is 1: # Maybe replace with .first()
+      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (-m.UnitOnT0[g] + m.UnitOn[g, t])
+   else:
+      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (-m.UnitOn[g, t-1] + m.UnitOn[g, t])
+
+# Compute the total startup and shutdown costs, across all generators and time periods.
+def compute_total_fixed_cost_rule(m):
+   return m.TotalFixedCost == sum(
+       m.StartupCost[g, t] + m.ShutdownCost[g, t]
+       for g in m.ThermalGenerators 
+       for t in m.TimePeriods
+   )
+
+model.ComputeStartupCosts = Constraint(
+    model.ThermalGenerators, model.TimePeriods, 
+    rule=compute_startup_costs_rule
+)
+model.ComputeShutdownCosts = Constraint(
+    model.ThermalGenerators, model.TimePeriods, 
+    rule=compute_shutdown_costs_rule
+)
+model.ComputeTotalFixedCost = Constraint(rule=compute_total_fixed_cost_rule)
+
+# Compute the total load curtailment cost
+def compute_total_curtailment_cost_rule(m):
+    return m.TotalCurtailmentCost == sum(
+        m.BusVOLL[b] * m.BusCurtailment[b,t]
+        for b in m.LoadBuses 
+        for t in m.TimePeriods
+    )
+
+model.ComputeTotalCurtailmentCost = Constraint(rule=compute_total_curtailment_cost_rule)
+
+# Ramping Cost
 def compute_total_ramping_cost_rule(m,t):
-    return m.RampingCost[t] == sum((m.FlexibleRampUpAvailable[g,t] + m.FlexibleRampDnAvailable[g,t])*m.RampCost[g] for g in m.ThermalGenerators | m.WindGenerators) 
+    return m.RampingCost[t] == sum(
+        (m.FlexibleRampUpAvailable[g,t] + m.FlexibleRampDnAvailable[g,t])*m.RampCost[g] 
+        for g in m.ThermalGenerators | m.WindGenerators
+    )
+
 model.EnforceFlexibleRampCost = Constraint(model.TimePeriods, rule=compute_total_ramping_cost_rule)
+
 # Objectives
-#
 
 def total_cost_objective_rule(m):
    return (
