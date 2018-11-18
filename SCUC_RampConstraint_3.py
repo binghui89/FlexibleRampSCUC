@@ -2556,7 +2556,7 @@ model.RegulatingReserveDnAvailable = Var(
     within=NonNegativeReals, initialize=0.0
 )
 model.SpinningReserveUpAvailable = Var(
-    model.AllGenerators, model.TimePeriods, 
+    model.ThermalGenerators, model.TimePeriods, 
     within=NonNegativeReals, initialize=0.0
 )
 
@@ -2582,10 +2582,6 @@ model.MaximumPowerAvailable = Var(
     model.AllGenerators, model.TimePeriods, 
     within=NonNegativeReals, initialize=0.0
 )
-model.MaxWindAvailable = Var(
-    model.WindGenerators, model.TimePeriods,
-    within=NonNegativeReals, initialize=0.0
-)
 
 # Costs
 # Production cost associated with each generator, for each time period.
@@ -2605,24 +2601,15 @@ model.ShutdownCost = Var(
     model.ThermalGenerators, model.TimePeriods, 
     within=NonNegativeReals, initialize=0.0
 )
-# All other overhead / fixed costs, e.g., associated with startup and shutdown.
 model.TotalFixedCost = Var(within=NonNegativeReals, initialize=0.0)
 
 model.BusCurtailment = Var(
     model.LoadBuses,model.TimePeriods, 
     within=NonNegativeReals, initialize=0.0
 )
-
 model.Curtailment = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
 model.TotalCurtailment = Var(initialize=0.0, within=NonNegativeReals) 
 model.TotalCurtailmentCost = Var(initialize=0.0, within=NonNegativeReals)
-
-model.SpinningReserveShortage = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
-
-model.RegulatingReserveShortage = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
-
-model.FlexibleRampUpShortage = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
-model.FlexibleRampDnShortage = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
 
 model.RampingCost = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
 
@@ -2692,6 +2679,15 @@ model.EnforceGeneratorOutputLimitsPartC = Constraint(
     rule=enforce_generator_output_limits_rule_part_c
 )
 
+# Maximum available power of non-thermal units less than forecast
+def enforce_renewable_generator_output_limits_rule(m, g, t):
+   return  m.MaximumPowerAvailable[g, t]<= m.PowerForecast[g,t]
+
+model.EnforceRenewableOutputLimits = Constraint(
+    model.NonThermalGenerators, model.TimePeriods, 
+    rule=enforce_renewable_generator_output_limits_rule
+)
+
 # Power generation of thermal units by block
 def enforce_generator_block_output_rule(m, g, t):
    return m.PowerGenerated[g, t] == (
@@ -2713,15 +2709,6 @@ model.EnforceGeneratorBlockOutputLimit = Constraint(
     rule=enforce_generator_block_output_limit_rule
 )
 
-# Power generation of non-thermal units less than forecast
-def enforce_renewable_generator_output_limits_rule(m, g, t):
-   return  m.PowerGenerated[g, t]<= m.PowerForecast[g,t]
-
-model.EnforceRenewableOutputLimits = Constraint(
-    model.NonThermalGenerators, model.TimePeriods, 
-    rule=enforce_renewable_generator_output_limits_rule
-)
-
 # impose upper bounds on the maximum power available for each generator in each time period, 
 # based on standard and start-up ramp limits.
 
@@ -2738,22 +2725,14 @@ def enforce_max_available_ramp_up_rates_rule(m, g, t):
     #                                    degenerate upper bound due to unit off)
     # (1, 1) - unit staying on:    RHS = standard ramp limit
     if t == 1: # Maybe we can use m.TimePeriod.first() here
-        return (
-            m.MaximumPowerAvailable[g, t] 
-            - m.RegulatingReserveUpAvailable[g,t] 
-            - m.SpinningReserveUpAvailable[g,t]
-        ) <= (
+        return m.MaximumPowerAvailable[g, t] <= (
             m.PowerGeneratedT0[g] 
             + m.NominalRampUpLimit[g] * m.UnitOnT0[g] 
             + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOnT0[g]) 
             + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
         )
     else:
-        return (
-            m.MaximumPowerAvailable[g, t] 
-            - m.RegulatingReserveUpAvailable[g,t] 
-            - m.SpinningReserveUpAvailable[g,t]
-        ) <= (
+        return m.MaximumPowerAvailable[g, t] <= (
             m.PowerGenerated[g, t-1] 
             + m.NominalRampUpLimit[g] * m.UnitOn[g, t-1] 
             + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, t-1]) 
@@ -2779,11 +2758,6 @@ def enforce_max_available_ramp_down_rates_rule(m, g, t):
     if t == value(m.NumTimePeriods): # Maybe we can use m.TimePeriod.last() here
         return Constraint.Skip
     else:
-        # RHS = (
-        #     m.MaximumPowerOutput[g]*m.UnitOn[g, t+1] 
-        #     + m.ShutdownRampLimit[g]*(m.UnitOn[g, t] - m.UnitOn[g, t+1])
-        # )
-        # return m.MaximumPowerAvailable[g, t] <= RHS
         return m.MaximumPowerAvailable[g, t] <= (
             m.MaximumPowerOutput[g] * m.UnitOn[g, t+1] 
             + m.ShutdownRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, t+1])
@@ -2807,11 +2781,7 @@ def enforce_ramp_down_limits_rule(m, g, t):
     # (1, 0) - unit switching off: RHS = shutdown ramp limit 
     # (1, 1) - unit staying on:    RHS = standard ramp-down limit 
     if t == 1:
-        return (
-            m.PowerGeneratedT0[g] 
-            - m.PowerGenerated[g, t] 
-            - m.RegulatingReserveDnAvailable[g,t]
-        ) <= (
+        return m.PowerGeneratedT0[g] - m.PowerGenerated[g, t] <= (
             m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
             + m.ShutdownRampLimit[g] * (m.UnitOnT0[g] - m.UnitOn[g, t]) 
             + m.MaximumPowerOutput[g] * (1 - m.UnitOnT0[g])
@@ -2833,7 +2803,7 @@ model.EnforceNominalRampDownLimits = Constraint(
 )
 
 #############################################
-# constraints for line capacity limits
+# Constraints for line capacity limits
 #############################################
 
 print('Building network constraints ...')
@@ -2870,7 +2840,7 @@ model.EnforceLineCapacityLimitsB = Constraint(
 
 
 #######################
-# up-time constraints #
+# Up-time constraints #
 #######################
 
 # Constraint due to initial conditions.
@@ -2930,7 +2900,7 @@ model.EnforceUpTimeConstraintsSubsequent = Constraint(
 )
 
 #########################
-# down-time constraints #
+# Down-time constraints #
 #########################
 
 # constraint due to initial conditions.
@@ -2989,33 +2959,287 @@ model.EnforceDownTimeConstraintsSubsequent = Constraint(
     rule=enforce_down_time_constraints_subsequent
 )
 
-##--------------------------------------------------------------------------------------------------
+#########################
+# Regulating, spinning, and flexible ramp reserves availability
+#########################
 
+def reserve_up_by_maximum_available_power_thermal_left_rule(m, g, t):
+    # Wang and Hobbs, equation (20)
+    if t is 1:
+        return m.MinimumPowerOutput[g] * (
+            m.UnitOn[g, t] + m.UnitOnT0[g] - 1
+        ) <= (
+            m.PowerGeneratedT0[g] 
+            + m.RegulatingReserveUpAvailable[g, t] 
+            + m.SpinningReserveUpAvailable[g, t]
+        )
+    else: # From t = 2 to end
+        return m.MinimumPowerOutput[g] * (
+            m.UnitOn[g, t] + m.UnitOn[g, t - 1] - 1
+        ) <= (
+            m.PowerGenerated[g, t - 1] 
+            + m.FlexibleRampUpAvailable[g, t - 1] 
+            + m.RegulatingReserveUpAvailable[g, t] 
+            + m.SpinningReserveUpAvailable[g, t]
+        )
 
-# m.MaxWindAvailable[g, t] = Max{m.PowerForecast[g,t],m.PowerForecast[g,t+1]}
-# Notice that a penalty is associated with m.MaxWindAvailable[g, t] in the objective
+def reserve_up_by_maximum_available_power_thermal_right_rule(m, g, t):
+    # Wang and Hobbs, equation (20)
+    if t is 1:
+        return (
+            m.PowerGeneratedT0[g] 
+            + m.RegulatingReserveUpAvailable[g, t] 
+            + m.SpinningReserveUpAvailable[g, t]
+        ) <= m.MaximumPowerAvailable[g, t] + m.MaximumPowerOutput[g] * (
+            1 - m.UnitOn[g, t]
+        )
+    else:
+        return (
+            m.PowerGenerated[g, t - 1] 
+            + m.FlexibleRampUpAvailable[g, t - 1] 
+            + m.RegulatingReserveUpAvailable[g, t] 
+            + m.SpinningReserveUpAvailable[g, t]
+        ) <= m.MaximumPowerAvailable[g, t] + m.MaximumPowerOutput[g] * (
+            1 - m.UnitOn[g, t]
+        )
 
-#def enforce_wind_generator_output_limits_a(m, g, t):
-#    if t < (len(m.TimePeriods)):
-#        return m.PowerGenerated[g, t] + m.FlexibleRampUpAvailable[g,t] <= m.MaximumPowerAvailable[g, t+1]
-#    else:
-#        return m.PowerGenerated[g, t] + m.FlexibleRampUpAvailable[g,t] <= m.MaximumPowerAvailable[g, t]
+def reserve_dn_by_maximum_available_power_thermal_left_rule(m, g, t):
+    # Wang and Hobbs, equation (21)
+    if t is 1:
+        return m.MinimumPowerOutput[g] * (
+            m.UnitOn[g, t] + m.UnitOnT0[g] - 1
+        ) <= (
+            m.PowerGeneratedT0[g] 
+            + m.RegulatingReserveDnAvailable[g, t]
+        )
+    else: # From t = 2 to end
+        return m.MinimumPowerOutput[g] * (
+            m.UnitOn[g, t] + m.UnitOn[g, t - 1] - 1
+        ) <= (
+            m.PowerGenerated[g, t - 1] 
+            + m.FlexibleRampDnAvailable[g, t - 1] 
+            + m.RegulatingReserveDnAvailable[g, t]
+        )
 
+def reserve_dn_by_maximum_available_power_thermal_right_rule(m, g, t):
+    # Wang and Hobbs, equation (21)
+    if t is 1:
+        return (
+            m.PowerGeneratedT0[g] 
+            + m.RegulatingReserveDnAvailable[g, t]
+        ) <= m.MaximumPowerAvailable[g, t] + m.MaximumPowerOutput[g] * (
+            1 - m.UnitOn[g, t]
+        )
+    else:
+        return (
+            m.PowerGenerated[g, t - 1] 
+            + m.FlexibleRampDnAvailable[g, t - 1] 
+            + m.RegulatingReserveDnAvailable[g, t] 
+        ) <= m.MaximumPowerAvailable[g, t] + m.MaximumPowerOutput[g] * (
+            1 - m.UnitOn[g, t]
+        )
 
+model.reserve_up_by_maximum_available_power_thermal_left_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_up_by_maximum_available_power_thermal_left_rule
+)
+model.reserve_up_by_maximum_available_power_thermal_right_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_up_by_maximum_available_power_thermal_right_rule
+)
+model.reserve_dn_by_maximum_available_power_thermal_left_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_dn_by_maximum_available_power_thermal_left_rule
+)
+model.reserve_dn_by_maximum_available_power_thermal_right_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_dn_by_maximum_available_power_thermal_right_rule
+)
+
+def reserve_up_by_maximum_available_power_wind_right_rule(m, g, t):
+    # Wang and Hobbs, equation (20) right degenerate to this for wind, note the 
+    # left hand side disappears since the minimum level for wind is 0
+    if t is 1:
+        return Constraint.Skip
+    else:
+        return (
+            m.PowerGenerated[g, t - 1] 
+            + m.FlexibleRampUpAvailable[g, t - 1]
+        ) <= m.MaximumPowerAvailable[g, t] 
+
+def reserve_dn_by_maximum_available_power_wind_right_rule(m, g, t):
+    # Wang and Hobbs, equation (21) right degenerate to this for wind, note the 
+    # left hand side disappears since the minimum level for wind is 0
+    if t is 1:
+        return Constraint.Skip
+    else:
+        return (
+            m.PowerGenerated[g, t - 1] 
+            + m.FlexibleRampDnAvailable[g, t - 1] 
+        ) <= m.MaximumPowerAvailable[g, t]
+
+model.reserve_up_by_maximum_available_power_wind_right_constraint = Constraint(
+    model.WindGenerators, model.TimePeriods,
+    rule=reserve_up_by_maximum_available_power_wind_right_rule
+)
+model.reserve_dn_by_maximum_available_power_wind_right_constraint = Constraint(
+    model.WindGenerators, model.TimePeriods,
+    rule=reserve_dn_by_maximum_available_power_wind_right_rule
+)
+
+def reserve_up_by_ramp_thermal_left_rule(m, g, t):
+    # Wang and Hobbs (26)
+    if t is 1:
+        return (
+            -m.NominalRampUpLimit[g] * m.UnitOn[g, t] 
+            - m.ShutdownRampLimit[g] * (m.UnitOnT0[g] - m.UnitOn[g, t]) 
+            - m.MaximumPowerOutput[g] * (1 - m.UnitOnT0[g])
+        ) <= m.SpinningReserveUpAvailable[g, t]
+    else:
+        return (
+            -m.NominalRampUpLimit[g] * m.UnitOn[g, t] 
+            - m.ShutdownRampLimit[g] * (m.UnitOn[g, t - 1] - m.UnitOn[g, t]) 
+            - m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t - 1])
+        ) <= (
+            m.FlexibleRampUpAvailable[g, t - 1] 
+            + m.SpinningReserveUpAvailable[g, t]
+        )
+
+def reserve_up_by_ramp_thermal_right_rule(m, g, t):
+    # Wang and Hobbs (26)
+    if t is 1:
+        return m.SpinningReserveUpAvailable[g, t] <= (
+            m.NominalRampUpLimit[g] * m.UnitOnT0[g] 
+            + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOnT0[g]) 
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
+        )
+    else:
+        return (
+            m.FlexibleRampUpAvailable[g, t - 1] 
+            + m.SpinningReserveUpAvailable[g, t]
+        ) <= (
+            m.NominalRampUpLimit[g] * m.UnitOn[g, t - 1] 
+            + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, t - 1]) 
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
+        )
+
+def reserve_dn_by_ramp_thermal_left_rule(m, g, t):
+    # Wang and Hobbs (27)
+    if t is 1:
+        return Constraint.Skip # No spinning down reserve
+    else:
+        return (
+            -m.NominalRampDownLimit[g] * m.UnitOn[g, t - 1] 
+            - m.ShutdownRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, t - 1]) 
+            - m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
+        ) <= m.FlexibleRampDnAvailable[g, t - 1] 
+
+def reserve_dn_by_ramp_thermal_right_rule(m, g, t):
+    # Wang and Hobbs (27)
+    if t is 1:
+        return Constraint.Skip # No spinning down reserve
+    else:
+        return m.FlexibleRampDnAvailable[g, t - 1] <= (
+            m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
+            + m.ShutdownRampLimit[g] * (m.UnitOn[g, t - 1] - m.UnitOn[g, t]) 
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t - 1])
+        )
+
+model.reserve_up_by_ramp_thermal_left_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_up_by_ramp_thermal_left_rule
+)
+model.reserve_up_by_ramp_thermal_right_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_up_by_ramp_thermal_right_rule
+)
+model.reserve_dn_by_ramp_thermal_left_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_dn_by_ramp_thermal_left_rule
+)
+model.reserve_dn_by_ramp_thermal_right_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_dn_by_ramp_thermal_right_rule
+)
+
+def reserve_up_by_ramp_plus_thermal_left_rule(m, g, t):
+    # Wang and Hobbs (28)
+    if t is 1:
+        return (
+            -m.MaximumPowerOutput[g] * m.UnitOnT0[g] 
+            + m.MinimumPowerOutput[g] * m.UnitOn[g, t]
+        ) <= m.SpinningReserveUpAvailable[g, t]
+    else:
+        return (
+            -m.MaximumPowerOutput[g] * m.UnitOn[g, t - 1] 
+            + m.MinimumPowerOutput[g] * m.UnitOn[g, t]
+        ) <= (
+            m.FlexibleRampUpAvailable[g, t - 1] 
+            + m.SpinningReserveUpAvailable[g, t]
+        )
+
+def reserve_up_by_ramp_plus_thermal_right_rule(m, g, t):
+    # Wang and Hobbs (28)
+    if t is 1:
+        return m.SpinningReserveUpAvailable[g, t] <= (
+            m.MaximumPowerOutput[g] * m.UnitOn[g, t]
+        )
+    else:
+        return (
+            m.FlexibleRampUpAvailable[g, t - 1] 
+            + m.SpinningReserveUpAvailable[g, t]
+        ) <= m.MaximumPowerOutput[g] * m.UnitOn[g, t]
+
+def reserve_dn_by_ramp_plus_thermal_left_rule(m, g, t):
+    # Wang and Hobbs (29), left hand side
+    if t is 1:
+        return Constraint.Skip # No spinning down reserve
+    else:
+        return -m.MaximumPowerOutput[g] * m.UnitOn[g, t] <= m.FlexibleRampDnAvailable[g, t - 1]
+
+def reserve_dn_by_ramp_plus_thermal_right_rule(m, g, t):
+    # Wang and Hobbs (29), revised since there is an error on the right hand 
+    # side.
+    if t is 1:
+        return Constraint.Skip # No spinning down reserve
+    else:
+        return m.FlexibleRampDnAvailable[g, t - 1] <= (
+            m.MaximumPowerOutput[g] * m.UnitOn[g, t - 1]
+            + m.MinimumPowerOutput[g] * m.UnitOn[g, t]
+        )
+
+model.reserve_up_by_ramp_plus_thermal_left_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_up_by_ramp_plus_thermal_left_rule
+)
+model.reserve_up_by_ramp_plus_thermal_right_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_up_by_ramp_plus_thermal_right_rule
+)
+model.reserve_dn_by_ramp_plus_thermal_left_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_dn_by_ramp_plus_thermal_left_rule
+)
+model.reserve_dn_by_ramp_plus_thermal_right_constraint = Constraint(
+    model.ThermalGenerators, model.TimePeriods,
+    rule=reserve_dn_by_ramp_plus_thermal_right_rule
+)
+
+################################################################################
 # Add flexible ramp requirement constraints
 def enforce_flexible_ramp_up_requirement_rule(m, t):
     return sum(
         m.FlexibleRampUpAvailable[g,t] 
         for g in (m.ThermalGenerators | m.WindGenerators)
-    ) >= m.FlexibleRampUpRequirement[t] #- m.FlexibleRampUpShortage[t] 
+    ) >= m.FlexibleRampUpRequirement[t] 
 
 def enforce_flexible_ramp_down_requirement_rule(m, t):
     return sum(
         m.FlexibleRampDnAvailable[g,t] 
         for g in (m.ThermalGenerators | m.WindGenerators)
-    ) >= m.FlexibleRampDnRequirement[t] #- m.FlexibleRampDnShortage[t]
+    ) >= m.FlexibleRampDnRequirement[t] 
 
-model.EnforceFlexibleRampUpRates   = Constraint(
+model.EnforceFlexibleRampUpRates = Constraint(
     model.TimePeriods, rule=enforce_flexible_ramp_up_requirement_rule
 )
 model.EnforceFlexibleRampDownRates = Constraint(
@@ -3023,131 +3247,110 @@ model.EnforceFlexibleRampDownRates = Constraint(
 )
 
 # Flexiramp product of thermal gens
-def enforce_flexible_ramp_down_limits_rule(m, g, t):
-    if t < len(m.TimePeriods):
-        return m.PowerGenerated[g, t] - m.FlexibleRampDnAvailable[g,t] >= m.MinimumPowerOutput[g] * m.UnitOn[g, t+1]
-    else:
-        return m.PowerGenerated[g, t] - m.FlexibleRampDnAvailable[g,t] >= m.MinimumPowerOutput[g] * m.UnitOn[g, t]
+# def enforce_flexible_ramp_down_limits_rule(m, g, t):
+#     if t < len(m.TimePeriods):
+#         return m.PowerGenerated[g, t] - m.FlexibleRampDnAvailable[g,t] >= m.MinimumPowerOutput[g] * m.UnitOn[g, t+1]
+#     else:
+#         return m.PowerGenerated[g, t] - m.FlexibleRampDnAvailable[g,t] >= m.MinimumPowerOutput[g] * m.UnitOn[g, t]
 
-def enforce_flexible_ramp_up_limits_rule(m, g, t):
-    if t < len(m.TimePeriods):
-        return m.PowerGenerated[g, t] + m.FlexibleRampUpAvailable[g,t] <= m.MaximumPowerAvailable[g, t+1]
-    else:
-        return m.PowerGenerated[g, t] + m.FlexibleRampUpAvailable[g,t] <= m.MaximumPowerAvailable[g, t]
+# def enforce_flexible_ramp_up_limits_rule(m, g, t):
+#     if t < len(m.TimePeriods):
+#         return m.PowerGenerated[g, t] + m.FlexibleRampUpAvailable[g,t] <= m.MaximumPowerAvailable[g, t+1]
+#     else:
+#         return m.PowerGenerated[g, t] + m.FlexibleRampUpAvailable[g,t] <= m.MaximumPowerAvailable[g, t]
 
-model.EnforceFlexibleRampDownLimits = Constraint(
-    model.ThermalGenerators, model.TimePeriods, 
-    rule=enforce_flexible_ramp_down_limits_rule
-)
-model.EnforceFlexibleRampUpLimits   = Constraint(
-    model.ThermalGenerators, model.TimePeriods, 
-    rule=enforce_flexible_ramp_up_limits_rule
-)
+# model.EnforceFlexibleRampDownLimits = Constraint(
+#     model.ThermalGenerators, model.TimePeriods, 
+#     rule=enforce_flexible_ramp_down_limits_rule
+# )
+# model.EnforceFlexibleRampUpLimits   = Constraint(
+#     model.ThermalGenerators, model.TimePeriods, 
+#     rule=enforce_flexible_ramp_up_limits_rule
+# )
 
 # Flexiramp product of wind gens
-def enforce_wind_generator_output_limits_a(m, g, t):
-   return m.PowerGenerated[g,t] + m.FlexibleRampUpAvailable[g,t] <= m.MaxWindAvailable[g, t]
+# def enforce_wind_generator_output_limits_a(m, g, t):
+#    return m.PowerGenerated[g,t] + m.FlexibleRampUpAvailable[g,t] <= m.MaxWindAvailable[g, t]
 
-def enforce_wind_generator_output_limits_b(m, g, t):
-   return m.PowerGenerated[g,t] - m.FlexibleRampDnAvailable[g,t] >= 0 
+# def enforce_wind_generator_output_limits_b(m, g, t):
+#    return m.PowerGenerated[g,t] - m.FlexibleRampDnAvailable[g,t] >= 0 
 
-model.EnforceWindFlexibleRampUpLimits = Constraint(
-    model.WindGenerators, model.TimePeriods, 
-    rule=enforce_wind_generator_output_limits_a
-)
-model.EnforceWindFlexibleRampDnLimits = Constraint(
-    model.WindGenerators, model.TimePeriods, 
-    rule=enforce_wind_generator_output_limits_b
-)
-
-# Maximum available wind power
-def enforce_max_wind_generator_output_limits_a(m, g, t):
-    return m.MaxWindAvailable[g, t] >= m.PowerForecast[g,t] 
-
-def enforce_max_wind_generator_output_limits_b(m, g, t):
-    if t < (len(m.TimePeriods)):
-        return m.MaxWindAvailable[g, t] >= m.PowerForecast[g,t+1]
-    else:
-      return Constraint.Skip  
-
-def enforce_wind_generator_output_limits_c(m, g, t):
-    return m.MaximumPowerAvailable[g, t] <= m.PowerForecast[g,t] 
-
-"""Model Justification (P_wt + FRU_gt <=   max{P_maxavail_wt, P_maxavail_wt+1}) """
-model.EnforceWindUpperLimits1 = Constraint(model.WindGenerators, model.TimePeriods, rule=enforce_max_wind_generator_output_limits_a)    
-model.EnforceWindUpperLimits2 = Constraint(model.WindGenerators, model.TimePeriods, rule=enforce_max_wind_generator_output_limits_b)  
-model.EnforceWindUpperLimits0 = Constraint(model.WindGenerators, model.TimePeriods, rule=enforce_wind_generator_output_limits_c)  
+# model.EnforceWindFlexibleRampUpLimits = Constraint(
+#     model.WindGenerators, model.TimePeriods, 
+#     rule=enforce_wind_generator_output_limits_a
+# )
+# model.EnforceWindFlexibleRampDnLimits = Constraint(
+#     model.WindGenerators, model.TimePeriods, 
+#     rule=enforce_wind_generator_output_limits_b
+# )
 
 #---------------------------------------------------------------
 
 # Ensure there is sufficient maximal power output available to meet both the 
 # demand and the spinning reserve requirements in each time period.
 # encodes Constraint 3 in Carrion and Arroyo.
-def enforce_reserve_requirements_rule(m, t):
-   return sum(m.MaximumPowerAvailable[g, t] for g in m.AllGenerators) >= (
-       m.Demand[t] 
-       - m.Curtailment[t] 
-       + m.RegulatingReserveRequirement[t] 
-       + m.SpinningReserveRequirement[t]
-   )
+# def enforce_reserve_requirements_rule(m, t):
+#    return sum(m.MaximumPowerAvailable[g, t] for g in m.AllGenerators) >= (
+#        m.Demand[t] 
+#        - m.Curtailment[t] 
+#        + m.RegulatingReserveRequirement[t] 
+#        + m.SpinningReserveRequirement[t]
+#    )
 
-model.EnforceReserveRequirements = Constraint(
-    model.TimePeriods, rule=enforce_reserve_requirements_rule
-)
+# model.EnforceReserveRequirements = Constraint(
+#     model.TimePeriods, rule=enforce_reserve_requirements_rule
+# )
 
 # Spinning reserve
-def calculate_spinning_reserve_up_available_per_generator(m, g, t):
-    return m.SpinningReserveUpAvailable[g, t]  <= m.MaximumPowerAvailable[g,t] - m.PowerGenerated[g,t]
+# def calculate_spinning_reserve_up_available_per_generator(m, g, t):
+#     return m.SpinningReserveUpAvailable[g, t]  <= m.MaximumPowerAvailable[g,t] - m.PowerGenerated[g,t]
 
+# def enforce_SpinningReserve_up_reserve_limit(m, g, t):
+#      return m.SpinningReserveUpAvailable[g,t]  <= m.UnitOn[g, t]*m.NominalRampUpLimit[g]/6 # 10 minutes
+
+# model.CalculateRegulatingReserveUpPerGenerator = Constraint(model.ThermalGenerators, model.TimePeriods, rule=calculate_spinning_reserve_up_available_per_generator)
+# model.EnforceSpiningReserveRates = Constraint(model.ThermalGenerators, model.TimePeriods, rule=enforce_SpinningReserve_up_reserve_limit)    
+
+# Spinning reserve requirements
 def enforce_spinning_reserve_requirement_rule(m,  t):
-    return sum(m.SpinningReserveUpAvailable[g,t] for g in m.ThermalGenerators) >= m.SpinningReserveRequirement[t] #- m.SpinningReserveShortage[t]
+    return sum(
+        m.SpinningReserveUpAvailable[g,t] for g in m.ThermalGenerators
+    ) >= m.SpinningReserveRequirement[t]
 
-def enforce_SpinningReserve_up_reserve_limit(m, g, t):
-     return m.SpinningReserveUpAvailable[g,t]  <= m.UnitOn[g, t]*m.NominalRampUpLimit[g]/6 # 10 minutes
-
-model.CalculateRegulatingReserveUpPerGenerator = Constraint(model.ThermalGenerators, model.TimePeriods, rule=calculate_spinning_reserve_up_available_per_generator)
-model.EnforceSpinningReserveUp = Constraint(model.TimePeriods, rule=enforce_spinning_reserve_requirement_rule) 
-model.EnforceSpiningReserveRates = Constraint(model.ThermalGenerators, model.TimePeriods, rule=enforce_SpinningReserve_up_reserve_limit)    
+model.EnforceSpinningReserveUp = Constraint(
+    model.TimePeriods, rule=enforce_spinning_reserve_requirement_rule
+)
 
 # Regulating reserve
 def enforce_regulating_up_reserve_requirement_rule(m, t):
-     return sum(m.RegulatingReserveUpAvailable[g,t] for g in m.ThermalGenerators) >= m.RegulatingReserveRequirement[t] #- m.RegulatingReserveShortage[t]
+     return sum(
+         m.RegulatingReserveUpAvailable[g,t] for g in m.ThermalGenerators
+     ) >= m.RegulatingReserveRequirement[t]
  
 def enforce_regulating_down_reserve_requirement_rule(m, t):
-     return sum(m.RegulatingReserveDnAvailable[g,t] for g in m.ThermalGenerators) >= m.RegulatingReserveRequirement[t] #- m.RegulatingReserveShortage[t]
+     return sum(
+         m.RegulatingReserveDnAvailable[g,t] for g in m.ThermalGenerators
+     ) >= m.RegulatingReserveRequirement[t]
 
-def enforce_regulating_up_reserve_limit(m, g, t):
-     return m.RegulatingReserveUpAvailable[g,t]  <= m.UnitOn[g, t]*m.NominalRampUpLimit[g]/6
+model.EnforceRegulatingUpReserveRequirements = Constraint(
+    model.TimePeriods, rule=enforce_regulating_up_reserve_requirement_rule
+)
+model.EnforceRegulatingDnReserveRequirements = Constraint(
+    model.TimePeriods, rule=enforce_regulating_down_reserve_requirement_rule
+)
 
-def enforce_regulating_down_reserve_limit(m, g, t):
-     return m.RegulatingReserveDnAvailable[g,t]  <= m.UnitOn[g, t]*m.NominalRampUpLimit[g]/6
+# def enforce_regulating_up_reserve_limit(m, g, t):
+#      return m.RegulatingReserveUpAvailable[g,t]  <= m.UnitOn[g, t]*m.NominalRampUpLimit[g]/6
 
-model.EnforceRegulatingUpReserveRequirements = Constraint(model.TimePeriods, rule=enforce_regulating_up_reserve_requirement_rule)
-model.EnforceRegulatingDnReserveRequirements = Constraint(model.TimePeriods, rule=enforce_regulating_down_reserve_requirement_rule)  
-model.EnforceRegulationUpRates = Constraint(model.ThermalGenerators, model.TimePeriods, rule=enforce_regulating_up_reserve_limit)  
-model.EnforceRegulationDnRates = Constraint(model.ThermalGenerators, model.TimePeriods, rule=enforce_regulating_down_reserve_limit)    
+# def enforce_regulating_down_reserve_limit(m, g, t):
+#      return m.RegulatingReserveDnAvailable[g,t]  <= m.UnitOn[g, t]*m.NominalRampUpLimit[g]/6
+
+# model.EnforceRegulationUpRates = Constraint(model.ThermalGenerators, model.TimePeriods, rule=enforce_regulating_up_reserve_limit)  
+# model.EnforceRegulationDnRates = Constraint(model.ThermalGenerators, model.TimePeriods, rule=enforce_regulating_down_reserve_limit)    
 
 #############################################
 # constraints for computing cost components #
 #############################################
-#---------------------------------------
-
-# Compute the per-generator, per-time period production costs. this is a 
-# "simple" piecewise linear construct. the first argument to piecewise is the 
-# index set. the second and third arguments are respectively the input and 
-# output variables. 
-"""
-model.ComputeProductionCosts = Piecewise(
-    model.ThermalGenerators * model.TimePeriods, model.ProductionCost, model.PowerGenerated, 
-    pw_pts=model.PowerGenerationPiecewisePoints, 
-    f_rule=production_cost_function, pw_constr_type='LB'
-)
-"""
-
-# New ADDITION
-# def production_cost_function(m, g, t):
-#     return m.ProductionCost[g,t] == value(m.ProductionCostA1[g])*(m.PowerGenerated[g,t])
-# model.ComputeProductionCost = Constraint()
 
 # Production cost, per gen per time slice
 def production_cost_function(m, g, t):
@@ -3231,23 +3434,9 @@ def total_cost_objective_rule(m):
        + m.TotalFixedCost
        + m.TotalCurtailmentCost
        + sum(m.RampingCost[t] for t in m.TimePeriods)
-       + 10000000*(
-           sum(
-               m.MaxWindAvailable[g,t]
-               for g in m.WindGenerators
-               for t in m.TimePeriods
-           )
-           + sum(
-               m.SpinningReserveShortage[t]
-               + m.RegulatingReserveShortage[t]
-               + m.FlexibleRampDnShortage[t]
-               + m.FlexibleRampUpShortage[t]
-               for t in m.TimePeriods
-           )
-       )
    )
-
-
-model.TotalCostObjective = Objective(rule=total_cost_objective_rule, sense=minimize)
+model.TotalCostObjective = Objective(
+    rule=total_cost_objective_rule, sense=minimize
+)
 
 
