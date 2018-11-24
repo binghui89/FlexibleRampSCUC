@@ -101,6 +101,7 @@ branch_df = pd.read_csv(data_path+'branch.csv',index_col=['BR_ID'])
 #bus_df.to_csv(data_path+'bus.csv')
 
 bus_df = pd.read_csv(data_path+'bus.csv',index_col=['BUS_ID'])
+bus_df['VOLL'] = 9000 # Note that we are using ERCOT's VOLL value, 9000 $/MWh
 bus_name = [
     'ODESSA 2 0',
     'PRESIDIO 2 0',
@@ -2244,8 +2245,8 @@ print('Done with all dictionaries')
 
 #
 # Reserve Parameters
-ReserveFactor = 0
-RegulatingReserveFactor = 0
+ReserveFactor = 0.1
+RegulatingReserveFactor = 0.1
 
 #****************************************************************************************************************************************************#
 # MODEL COMPONENTS
@@ -2513,6 +2514,20 @@ model.SpinningReserveUpAvailable = Var(
     within=NonNegativeReals, initialize=0.0
 )
 
+# Reserve shortages
+model.RegulatingReserveUpShortage = Var(
+    model.TimePeriods,
+    within=NonNegativeReals, initialize=0.0
+)
+model.RegulatingReserveDnShortage = Var(
+    model.TimePeriods,
+    within=NonNegativeReals, initialize=0.0
+)
+model.SpinningReserveUpShortage = Var(
+    model.TimePeriods, 
+    within=NonNegativeReals, initialize=0.0
+)
+
 # Generator related variables
 # Indicator variables for each generator, at each time period.
 model.UnitOn = Var(
@@ -2563,6 +2578,7 @@ model.BusCurtailment = Var(
 model.Curtailment = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
 model.TotalCurtailment = Var(initialize=0.0, within=NonNegativeReals) 
 model.TotalCurtailmentCost = Var(initialize=0.0, within=NonNegativeReals)
+model.TotalReserveShortageCost = Var(initialize=0.0, within=NonNegativeReals)
 
 #*****************************************************************************************************************************************************#
 """CONSTRAINTS"""
@@ -2968,7 +2984,7 @@ model.reserve_dn_by_ramp_thermal_constraint = Constraint(
 def enforce_spinning_reserve_requirement_rule(m,  t):
     return sum(
         m.SpinningReserveUpAvailable[g,t] for g in m.ThermalGenerators
-    ) >= m.SpinningReserveRequirement[t]
+    ) + m.SpinningReserveUpShortage[t] - m.SpinningReserveRequirement[t] == 0
 
 model.EnforceSpinningReserveUp = Constraint(
     model.TimePeriods, rule=enforce_spinning_reserve_requirement_rule
@@ -2978,12 +2994,12 @@ model.EnforceSpinningReserveUp = Constraint(
 def enforce_regulating_up_reserve_requirement_rule(m, t):
      return sum(
          m.RegulatingReserveUpAvailable[g,t] for g in m.ThermalGenerators
-     ) >= m.RegulatingReserveRequirement[t]
+     ) + m.RegulatingReserveUpShortage[t] - m.RegulatingReserveRequirement[t] == 0
  
 def enforce_regulating_down_reserve_requirement_rule(m, t):
      return sum(
          m.RegulatingReserveDnAvailable[g,t] for g in m.ThermalGenerators
-     ) >= m.RegulatingReserveRequirement[t]
+     ) + m.RegulatingReserveDnShortage[t] - m.RegulatingReserveRequirement[t] == 0
 
 model.EnforceRegulatingUpReserveRequirements = Constraint(
     model.TimePeriods, rule=enforce_regulating_up_reserve_requirement_rule
@@ -3061,6 +3077,17 @@ def compute_total_curtailment_cost_rule(m):
 
 model.ComputeTotalCurtailmentCost = Constraint(rule=compute_total_curtailment_cost_rule)
 
+# Compute the total reserve shortage cost
+def compute_total_reserve_shortage_cost_rule(m):
+    return m.TotalReserveShortageCost == sum(
+        m.SpinningReserveUpShortage[t] * 2000
+        + m.RegulatingReserveUpShortage[t] * 5500
+        + m.RegulatingReserveDnShortage[t] * 5500
+        for t in m.TimePeriods
+    )
+
+model.ComputeTotalReserveShortageCost = Constraint(rule=compute_total_curtailment_cost_rule)
+
 # Objectives
 
 def total_cost_objective_rule(m):
@@ -3068,6 +3095,7 @@ def total_cost_objective_rule(m):
        m.TotalProductionCost
        + m.TotalFixedCost
        + m.TotalCurtailmentCost
+       + m.TotalReserveShortageCost
    )
 model.TotalCostObjective = Objective(
     rule=total_cost_objective_rule, sense=minimize
