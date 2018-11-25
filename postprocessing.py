@@ -50,21 +50,38 @@ def store_csvs(instance, dirwork = None):
             os.mkdir(dirwork)
         os.chdir(dirwork)
 
-    vars_2dim = [
-        'FlexibleRampUpAvailable',
-        'FlexibleRampDnAvailable',
-        'RegulatingReserveUpAvailable',
-        'RegulatingReserveDnAvailable',
-        'SpinningReserveUpAvailable',
-        'UnitOn',
-        'PowerGenerated',
-        'MaximumPowerAvailable',
-        'MaxWindAvailable',
-        'ProductionCost',
-        'StartupCost',
-        'ShutdownCost',
-        'BusCurtailment', # Note BusCurtailment is indexed by bus and time period
-    ]
+    vars_0dim = list()
+    vars_1dim = list()
+    vars_2dim = list()
+    vars_3dim = list()
+    for v in instance.component_objects(Var, active=True):
+        vdim = getattr( getattr(instance, v.local_name), 'dim')
+        if vdim() == 0:
+            vars_0dim.append(v.local_name)
+        elif vdim() == 1:
+            vars_1dim.append(v.local_name)
+        elif vdim() == 2:
+            vars_2dim.append(v.local_name)
+        elif vdim() == 3:
+            vars_3dim.append(v.local_name)
+    print vars_0dim
+    print vars_1dim
+    print vars_2dim
+    # vars_2dim = [
+    #     'FlexibleRampUpAvailable',
+    #     'FlexibleRampDnAvailable',
+    #     'RegulatingReserveUpAvailable',
+    #     'RegulatingReserveDnAvailable',
+    #     'SpinningReserveUpAvailable',
+    #     'UnitOn',
+    #     'PowerGenerated',
+    #     'MaximumPowerAvailable',
+    #     'MaxWindAvailable',
+    #     'ProductionCost',
+    #     'StartupCost',
+    #     'ShutdownCost',
+    #     'BusCurtailment', # Note BusCurtailment is indexed by bus and time period
+    # ]
     for v_ij in vars_2dim:
         df_v_ij = extract_var_2dim(instance, v_ij)
         csvname = '.'.join([v_ij, 'csv'])
@@ -72,14 +89,14 @@ def store_csvs(instance, dirwork = None):
     
     # Note that variables indexed by only 1 index are normally indexed by time 
     # period.
-    vars_1dim = [
-        'Curtailment',
-        'SpinningReserveShortage',
-        'RegulatingReserveShortage',
-        'FlexibleRampUpShortage',
-        'FlexibleRampDnShortage',
-        'RampingCost',
-    ]
+    # vars_1dim = [
+    #     'Curtailment',
+    #     'SpinningReserveShortage',
+    #     'RegulatingReserveShortage',
+    #     'FlexibleRampUpShortage',
+    #     'FlexibleRampDnShortage',
+    #     'RampingCost',
+    # ]
     dict_v_i = dict()
     for v_i in vars_1dim:
         list_index, list_v = extract_var_1dim(instance, v_i)
@@ -92,13 +109,13 @@ def store_csvs(instance, dirwork = None):
         columns=['time period'] + vars_1dim,
     )
 
-    vars_0dim = [
-        'TotalProductionCost',
-        'TotalFixedCost',
-        'TotalCurtailment',
-        'TotalCurtailmentCost',
-        'TotalCostObjective', # Note this is the objective function
-    ]
+    # vars_0dim = [
+    #     'TotalProductionCost',
+    #     'TotalFixedCost',
+    #     'TotalCurtailment',
+    #     'TotalCurtailmentCost',
+    #     'TotalCostObjective', # Note this is the objective function
+    # ]
     list_v = list()
     for vname in vars_0dim:
         tmp_v = value( getattr(instance, vname) )
@@ -110,9 +127,9 @@ def store_csvs(instance, dirwork = None):
     df_v = pd.DataFrame.from_dict(dict_v)
     df_v.to_csv('0dim_var.csv', index=False)
 
-    vars_3dim = [
-        'BlockPowerGenerated',
-    ]
+    # vars_3dim = [
+    #     'BlockPowerGenerated',
+    # ]
     
     os.chdir(dirhome)
 
