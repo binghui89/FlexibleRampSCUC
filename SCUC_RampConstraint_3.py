@@ -57,26 +57,27 @@ gen_df['RAMP_60'] = gen_df['RAMP_10']*6
 #wind_gen_bus_df = pd.merge(wind_gen_df,bus_df, left_on=['GEN_BUS'], right_on = 'BUS_ID', left_index=True)
 #wind_gen_bus_df.set_index(wind_gen_df.index, inplace=True)
 #wind_gen_bus_df.to_csv(data_path+'wind_generator_data.csv')
-"""
-Scaling Wind Generation
-"""
-wind_penetration_wanted = 0.10 # 
-wind_penetration_current = sum(
-    gen_df.loc[x ,'PMAX']
-    for x in gen_df.index 
-    if x.startswith('wind'))/ sum(gen_df['PMAX']
-)
-wind_scaling_facor = wind_penetration_wanted * (1/wind_penetration_current -1)/(1-wind_penetration_wanted)   
 
-for x in gen_df.index:
-    if x.startswith('wind'):
-        gen_df.loc[x ,'PMAX'] = wind_scaling_facor*gen_df.loc[x ,'PMAX']
+# """
+# Scaling Wind Generation
+# """
+# wind_penetration_wanted = 0.10 # 
+# wind_penetration_current = sum(
+#     gen_df.loc[x ,'PMAX']
+#     for x in gen_df.index 
+#     if x.startswith('wind'))/ sum(gen_df['PMAX']
+# )
+# wind_scaling_facor = wind_penetration_wanted * (1/wind_penetration_current -1)/(1-wind_penetration_wanted)   
+
+# for x in gen_df.index:
+#     if x.startswith('wind'):
+#         gen_df.loc[x ,'PMAX'] = wind_scaling_facor*gen_df.loc[x ,'PMAX']
     
 genfor_df = pd.read_csv(data_path+'generator.csv',index_col=0)
 
-for x in genfor_df.columns:
-    if x.startswith('wind'):
-        genfor_df.loc[:,x] = wind_scaling_facor*genfor_df.loc[:,x]
+# for x in genfor_df.columns:
+#     if x.startswith('wind'):
+#         genfor_df.loc[:,x] = wind_scaling_facor*genfor_df.loc[:,x]
 
 
 
