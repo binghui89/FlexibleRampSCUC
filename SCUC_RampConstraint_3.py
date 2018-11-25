@@ -2972,14 +2972,14 @@ def reserve_dn_by_ramp_thermal_rule(m, g, t):
         - 10/60 * m.NominalRampDownLimit[g] * m.UnitOn[g, t]
     ) <= 0    
 
-model.reserve_up_by_ramp_thermal_constraint = Constraint(
-    model.ThermalGenerators, model.TimePeriods,
-    rule=reserve_up_by_ramp_thermal_rule
-)
-model.reserve_dn_by_ramp_thermal_constraint = Constraint(
-    model.ThermalGenerators, model.TimePeriods,
-    rule=reserve_dn_by_ramp_thermal_rule
-)
+# model.reserve_up_by_ramp_thermal_constraint = Constraint(
+#     model.ThermalGenerators, model.TimePeriods,
+#     rule=reserve_up_by_ramp_thermal_rule
+# )
+# model.reserve_dn_by_ramp_thermal_constraint = Constraint(
+#     model.ThermalGenerators, model.TimePeriods,
+#     rule=reserve_dn_by_ramp_thermal_rule
+# )
 
 # Spinning reserve requirements
 def enforce_spinning_reserve_requirement_rule(m,  t):
