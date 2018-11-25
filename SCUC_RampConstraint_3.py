@@ -2246,7 +2246,7 @@ print('Done with all dictionaries')
 #
 # Reserve Parameters
 ReserveFactor = 0.1
-RegulatingReserveFactor = 0.1
+RegulatingReserveFactor = 0.05
 
 #****************************************************************************************************************************************************#
 # MODEL COMPONENTS
@@ -3086,7 +3086,7 @@ def compute_total_reserve_shortage_cost_rule(m):
         for t in m.TimePeriods
     )
 
-model.ComputeTotalReserveShortageCost = Constraint(rule=compute_total_curtailment_cost_rule)
+model.ComputeTotalReserveShortageCost = Constraint(rule=compute_total_reserve_shortage_cost_rule)
 
 # Objectives
 
