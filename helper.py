@@ -83,7 +83,7 @@ def import_scenario_data(print_error=False):
             for h in range(1, 25):
                 tmp_data = df_tmp.loc[h-1, c]
                 WindPowerForecast[s][w, h] = output_scaler*tmp_data
-    print "Scenario data created!"
+    # print "Scenario data created!"
     return scenario_names, WindPowerForecast
 
 def scenario_data_118():

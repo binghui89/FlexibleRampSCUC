@@ -64,9 +64,9 @@ def store_csvs(instance, dirwork = None):
             vars_2dim.append(v.local_name)
         elif vdim() == 3:
             vars_3dim.append(v.local_name)
-    print vars_0dim
-    print vars_1dim
-    print vars_2dim
+    # print vars_0dim
+    # print vars_1dim
+    # print vars_2dim
     # vars_2dim = [
     #     'FlexibleRampUpAvailable',
     #     'FlexibleRampDnAvailable',
