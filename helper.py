@@ -4,7 +4,7 @@ from IPython import embed as IP
 def import_scenario_data(print_error=False):
 
     # File locations
-    dir_TX2kB = os.path.sep.join( ['.',       'TEXAS2k_B'] )
+    dir_TX2kB = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B'
     f_gen     = os.path.sep.join( [dir_TX2kB, 'generator_data_plexos_withRT.csv'] )
     f_genfor  = os.path.sep.join( [dir_TX2kB, 'generator.csv'] )
     f_genwind = os.path.sep.join( [dir_TX2kB, 'wind_generator_data.csv'] )
