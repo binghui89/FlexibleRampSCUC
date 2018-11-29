@@ -47,7 +47,7 @@ model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
 #=======================================================#
 # INPUT DATA                                            #
 #=======================================================#
-data_path = './TEXAS2k_B/'
+data_path = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/'
 print('loading data ...')
 
 gen_df = pd.read_csv(data_path+'generator_data_plexos_withRT.csv',index_col=0)
@@ -2577,7 +2577,7 @@ model.BusCurtailment = Var(
     within=NonNegativeReals, initialize=0.0
 )
 model.Curtailment = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
-model.TotalCurtailment = Var(initialize=0.0, within=NonNegativeReals) 
+# model.TotalCurtailment = Var(initialize=0.0, within=NonNegativeReals) 
 model.TotalCurtailmentCost = Var(initialize=0.0, within=NonNegativeReals)
 model.TotalReserveShortageCost = Var(initialize=0.0, within=NonNegativeReals)
 
@@ -2596,8 +2596,8 @@ model.TotalReserveShortageCost = Var(initialize=0.0, within=NonNegativeReals)
 def definition_hourly_curtailment_rule(m, t):
    return m.Curtailment[t] == sum(m.BusCurtailment[b, t] for b in m.LoadBuses)
 
-def definition_total_curtailment_rule(m):
-   return m.TotalCurtailment == sum(m.Curtailment[t] for t in m.TimePeriods)
+# def definition_total_curtailment_rule(m):
+#    return m.TotalCurtailment == sum(m.Curtailment[t] for t in m.TimePeriods)
 
 def production_equals_demand_rule(m, t):
    return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) == m.Demand[t] - m.Curtailment[t]
@@ -2608,7 +2608,7 @@ model.DefineHourlyCurtailment = Constraint(
 model.ProductionEqualsDemand = Constraint(
     model.TimePeriods, rule=production_equals_demand_rule
 )
-model.DefineTotalCurtailment = Constraint(rule=definition_total_curtailment_rule)
+# model.DefineTotalCurtailment = Constraint(rule=definition_total_curtailment_rule)
 
 ############################################
 # generation limit and ramping constraints #
