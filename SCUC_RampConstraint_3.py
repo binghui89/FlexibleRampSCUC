@@ -49,7 +49,61 @@ data_path = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/'
 print('loading data ...')
 
 gen_df = pd.read_csv(data_path+'generator_data_plexos_withRT.csv',index_col=0)
-gen_df['RAMP_60'] = gen_df['RAMP_10']*6
+
+# Update generator data
+gen_df['RAMP_60'] = gen_df['RAMP_10']*6 # 60 minutes ramp rates
+gen_df.loc[gen_df['GEN_TYPE']=='Renewable', 'STARTUP'] = 0
+
+# This iteration-based way is not the most Pythonic, but it gets better readability
+for i, row in gen_df.iterrows():
+    cap    = gen_df.loc[i, 'PMAX']
+    s_cost = gen_df.loc[i, 'STARTUP']
+    tmin   = gen_df.loc[i, 'MINIMUM_UP_TIME']
+    t0     = gen_df.loc[i, 'GEN_STATUS']
+    if i.startswith('coal'):
+        if cap <= 300:
+            # Subcritical steam cycle
+            s_cost = 16.28*cap
+            tmin = 4 # Min on/offline time
+            t0 = tmin # Initial online time
+        else:
+            # Supercritical steam cycle
+            s_cost = 29.44*cap
+            tmin = 12
+            t0 = tmin
+    elif i.startswith('ng'):
+        if cap <= 50:
+            # Small aeroderivative turbines
+            s_cost = 8.23*cap
+            tmin = 1
+            t0 = tmin
+        elif cap <= 100:
+            # Small aeroderivative turbines
+            s_cost = 8.23*cap
+            tmin = 3
+            t0 = tmin
+        elif cap <= 450:
+            # Heavy-duty GT
+            s_cost = 1.70*cap
+            tmin = 5
+            t0 = tmin
+        else:
+            # CCGT
+            s_cost = 1.74*cap
+            tmin = 8
+            t0 = tmin
+    elif i.startswith('nuc'):
+        # Supercritical steam cycle
+        s_cost = 29.44*cap
+        tmin = 100
+        t0 = 1 # Nuclear units never go offline
+
+    gen_df.loc[i, 'STARTUP']  = s_cost
+    gen_df.loc[i, 'SHUTDOWN'] = s_cost
+    gen_df.loc[i, 'MINIMUM_UP_TIME']   = tmin
+    gen_df.loc[i, 'MINIMUM_DOWN_TIME'] = tmin
+    gen_df.loc[i, 'GEN_STATUS'] = t0 # All but nuclear units are free to be go offline
+
 #bus_df = pd.read_csv(data_path+'bus.csv',index_col=None)
 #wind_gen_df = gen_df.loc[wind_generator_names,:].copy()
 #wind_gen_bus_df = pd.merge(wind_gen_df,bus_df, left_on=['GEN_BUS'], right_on = 'BUS_ID', left_index=True)
@@ -2784,12 +2838,12 @@ def create_model():
     # Limits for start-up/shut-down
     model.StartupRampLimit  = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['STARTUP_RAMP'].to_dict(),
+        within=NonNegativeReals, initialize=genth_df['RAMP_60'].to_dict(),
         validate=at_least_generator_minimum_output_validator
     )
     model.ShutdownRampLimit = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['SHUTDOWN_RAMP'].to_dict(),
+        within=NonNegativeReals, initialize=genth_df['RAMP_60'].to_dict(),
         validate=at_least_generator_minimum_output_validator
     )
 
@@ -2854,11 +2908,11 @@ def create_model():
     # often set to 0.
     model.ShutdownCostCoefficient = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['STARTUP'].to_dict()
+        within=NonNegativeReals, initialize=genth_df['SHUTDOWN'].to_dict()
     ) # units are $.
     model.StartupCostCoefficient = Param(
         model.ThermalGenerators, 
-        within=NonNegativeReals, initialize=genth_df['SHUTDOWN'].to_dict()
+        within=NonNegativeReals, initialize=genth_df['STARTUP'].to_dict()
     ) # units are $.
 
     model.ReserveFactor = Param(
