@@ -86,6 +86,25 @@ def import_scenario_data(print_error=False):
     # print "Scenario data created!"
     return scenario_names, WindPowerForecast
 
+def extract_uniton(csv_efout):
+    df_efout  = pd.read_csv(
+        csv_efout, names=['Stage', 'Node', 'Varname', 'Varindex', 'Value']
+    )
+
+    ls_stage = df_efout['Stage'].unique().tolist()
+    ls_node  = df_efout['Node'].unique().tolist()
+    ls_var   = df_efout['Varname'].unique().tolist()
+
+    varname = [i for i in ls_var if 'UnitOn' in i]
+    varname = varname.pop() # Assue there is only one hit
+    dict_uniton = dict()
+    for i, irow in df_efout.loc[df_efout['Varname']==varname, :].iterrows():
+        gen, t = df_efout.loc[i, 'Varindex'].split(':')
+        gen = gen.split("'")[1]
+        v = int(round(df_efout.loc[i, 'Value']))
+        dict_uniton[gen, int(t)] = v
+    return dict_uniton
+
 def scenario_data_118():
     PowerForecastWind_w = import_scenario_data()
     PowerForecastWind_W = dict()

@@ -174,52 +174,97 @@ def calculate_power_by_type(csvname):
     col['Natural gas'] = [i for i in df_power_by_gen.columns if i.startswith('ng')]
     col['Coal']        = [i for i in df_power_by_gen.columns if i.startswith('coal')]
     col['Nuclear']     = [i for i in df_power_by_gen.columns if i.startswith('nuclear')]
-    col['Hydro']       = [i for i in df_power_by_gen.columns if i.startswith('wind')]
-    col['Wind']        = [i for i in df_power_by_gen.columns if i.startswith('solar')]
-    col['Solar']       = [i for i in df_power_by_gen.columns if i.startswith('hydro')]
+    col['Hydro']       = [i for i in df_power_by_gen.columns if i.startswith('hydro')]
+    col['Wind']        = [i for i in df_power_by_gen.columns if i.startswith('wind')]
+    col['Solar']       = [i for i in df_power_by_gen.columns if i.startswith('solar')]
     dict_of_series = dict()
     for r in resource_types:
         dict_of_series[r] = df_power_by_gen[ col[r] ].sum(axis=1)
     df_power_by_type = pd.DataFrame( dict_of_series )
     return df_power_by_type
 
-if __name__ == "__main__":
-    dir_data = "C:\\Users\\bxl180002\\Downloads\\results_10scenario_independent"
-    scenarios = [
-        "Q10Scenario",
-        "Q20Scenario",
-        "Q30Scenario",
-        "Q40Scenario",
-        "Q50Scenario",
-        "Q60Scenario",
-        "Q70Scenario",
-        "Q80Scenario",
-        "Q90Scenario",
-    ]
-    fig = plt.figure(figsize=(6, 8), dpi=80, facecolor='w', edgecolor='k')
-    gs = gridspec.GridSpec(3, 3, hspace=0.05, wspace=0.05)
-    for s in scenarios:
-        csvname = os.path.sep.join([dir_data, s, 'PowerGenerated.csv'])
-        df_power_by_type = calculate_power_by_type(csvname)
-        # fig = plt.figure()
-        # ax = plt.subplot(111)
-        ax = plt.subplot( gs[scenarios.index(s)] )
-        handles, names = plot_power(ax, df_power_by_type, title=s)
-        if scenarios.index(s)%3 == 0:
-            ax.set_ylabel('Power (GW)')
-        else:
-            plt.setp(ax.get_yticklabels(), visible=False)
-        if scenarios.index(s)>5:
-            ax.set_xlabel('Time (h)')
-        else:
-            plt.setp(ax.get_xticklabels(), visible=False)
-    plt.subplots_adjust(left=0.10, right=0.90, top=0.99, bottom=0.15)
-    fig.legend(
-            handles, names, 
-            loc='lower center', 
-            ncol=len(names)/2, 
-            bbox_to_anchor=(0.5, 0.02),
-            edgecolor=None
-        )
+def read_determine(dircsv):
+    snames = ['N' + str(i) + 'Scenario' for i in range(1, 11)]
+    ReserveFactor = 0.1
+    RegulatingReserveFactor = 0.05
+    csv_load  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
 
+    df_load  = pd.read_csv(csv_load,  index_col=0)
+    cbus = [c for c in df_load.columns if c.startswith('bus')]
+    df_load['SUMBUS'] = df_load.loc[:, cbus].sum(axis=1)
+    df_load['SPNUP']  = df_load['SUMBUS']*ReserveFactor
+    df_load['REGUP']  = df_load['SUMBUS']*RegulatingReserveFactor
+    df_load['REGDN']  = df_load['SUMBUS']*RegulatingReserveFactor
+
+    plt.plot(
+        df_load.index, df_load['SUMBUS'], 'k+',
+        df_load.index, df_load['SUMBUS'] + df_load['SPNUP'], 'r',
+        df_load.index, df_load['SUMBUS'] + df_load['REGUP'], 'b',
+        df_load.index, df_load['SUMBUS']-1*df_load['REGDN'], 'b',
+    )
+
+    for s in snames:
+        dirscenario_ed = os.path.sep.join([dircsv, s, 'ED'])
+        csv_regup = os.path.sep.join([dirscenario_ed, 'RegulatingReserveUpAvailable.csv'])
+        csv_regdn = os.path.sep.join([dirscenario_ed, 'RegulatingReserveDnAvailable.csv'])
+        csv_spnup = os.path.sep.join([dirscenario_ed, 'SpinningReserveUpAvailable.csv'])
+        csv_power = os.path.sep.join([dirscenario_ed, 'PowerGenerated.csv'])
+
+        df_spnup = pd.read_csv(csv_spnup, index_col=0)
+        df_regup = pd.read_csv(csv_regup, index_col=0)
+        df_regdn = pd.read_csv(csv_regdn, index_col=0)
+        df_power = pd.read_csv(csv_power, index_col=0)
+
+        diff_spnup = df_load['SPNUP'] - df_spnup.sum(axis=1)
+        diff_regup = df_load['REGUP'] - df_regup.sum(axis=1)
+        diff_regdn = df_load['REGDN'] - df_regdn.sum(axis=1)
+
+        plt.plot(
+            df_load.index, df_load['SUMBUS'] + df_spnup.sum(axis=1), 'k',
+            df_load.index, df_power.sum(axis=1), 'g',
+        )
     plt.show()
+
+if __name__ == "__main__":
+    # dir_data = "C:\\Users\\bxl180002\\Downloads\\results_10scenario_independent"
+    # scenarios = [
+    #     "Q10Scenario",
+    #     "Q20Scenario",
+    #     "Q30Scenario",
+    #     "Q40Scenario",
+    #     "Q50Scenario",
+    #     "Q60Scenario",
+    #     "Q70Scenario",
+    #     "Q80Scenario",
+    #     "Q90Scenario",
+    # ]
+    # fig = plt.figure(figsize=(6, 8), dpi=80, facecolor='w', edgecolor='k')
+    # gs = gridspec.GridSpec(3, 3, hspace=0.05, wspace=0.05)
+    # for s in scenarios:
+    #     csvname = os.path.sep.join([dir_data, s, 'PowerGenerated.csv'])
+    #     df_power_by_type = calculate_power_by_type(csvname)
+    #     # fig = plt.figure()
+    #     # ax = plt.subplot(111)
+    #     ax = plt.subplot( gs[scenarios.index(s)] )
+    #     handles, names = plot_power(ax, df_power_by_type, title=s)
+    #     if scenarios.index(s)%3 == 0:
+    #         ax.set_ylabel('Power (GW)')
+    #     else:
+    #         plt.setp(ax.get_yticklabels(), visible=False)
+    #     if scenarios.index(s)>5:
+    #         ax.set_xlabel('Time (h)')
+    #     else:
+    #         plt.setp(ax.get_xticklabels(), visible=False)
+    # plt.subplots_adjust(left=0.10, right=0.90, top=0.99, bottom=0.15)
+    # fig.legend(
+    #         handles, names, 
+    #         loc='lower center', 
+    #         ncol=len(names)/2, 
+    #         bbox_to_anchor=(0.5, 0.02),
+    #         edgecolor=None
+    #     )
+
+    # plt.show()
+
+    dircsv = '/home/bxl180002/git/FlexibleRampSCUC/results_determin'
+    read_determine(dircsv)
