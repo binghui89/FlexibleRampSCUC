@@ -2788,13 +2788,13 @@ def create_model():
     # The global system demand, for each time period. units are MW.
     model.Demand = Param(
         model.TimePeriods,
-        within=NonNegativeReals, initialize=load_df['LOAD'].to_dict()
+        within=NonNegativeReals, initialize=load_df['LOAD'].to_dict(), mutable=True
     )
 
     # The bus-by-bus demand and value of loss load, for each time period. units are MW and $/MW.
     model.BusDemand = Param(
         model.LoadBuses, model.TimePeriods,
-        within=NonNegativeReals, initialize=load_dict
+        within=NonNegativeReals, initialize=load_dict, mutable=True
     )
     model.BusVOLL = Param(
         model.LoadBuses,
@@ -2862,26 +2862,29 @@ def create_model():
     model.UnitOnT0State = Param(
         model.ThermalGenerators,
         within=Integers, initialize=genth_df['GEN_STATUS'].to_dict(),
-        validate=t0_state_nonzero_validator
+        validate=t0_state_nonzero_validator, mutable=True
     )
 
     model.UnitOnT0 = Param(
-        model.ThermalGenerators, within=Binary, initialize=t0_unit_on_rule
+        model.ThermalGenerators,
+        within=Binary, initialize=t0_unit_on_rule, mutable=True
     )
 
     model.InitialTimePeriodsOnLine = Param(
         model.ThermalGenerators,
-        within=NonNegativeIntegers, initialize=initial_time_periods_online_rule
+        within=NonNegativeIntegers, initialize=initial_time_periods_online_rule,
+        mutable=True
     )
     model.InitialTimePeriodsOffLine = Param(
         model.ThermalGenerators,
-        within=NonNegativeIntegers, initialize=initial_time_periods_offline_rule
+        within=NonNegativeIntegers, initialize=initial_time_periods_offline_rule,
+        mutable=True
     )
 
     # Generator power output at t=0 (initial condition). units are MW.
     model.PowerGeneratedT0 = Param(
         model.AllGenerators, 
-        within=NonNegativeReals, initialize=gen_df['PMIN'].to_dict()
+        within=NonNegativeReals, initialize=gen_df['PMIN'].to_dict(), mutable=True
     )
 
     # Production cost coefficients (for the quadratic) 
