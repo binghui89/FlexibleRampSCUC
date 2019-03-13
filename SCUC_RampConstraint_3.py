@@ -40,8 +40,119 @@ from pyomo.opt import SolverFactory
 import time
 from IPython import embed as IP
 
+class Network(object):
+    def __init__(self, csvbus, csvbranch, csvptdf, csvgen, csvmarginalcost, csvblockmarginalcost, csvblockoutputlimit):
+        self.df_bus              = pd.read_csv(csvbus,               index_col=['BUS_ID'])
+        self.df_branch           = pd.read_csv(csvbranch,            index_col=['BR_ID'])
+        self.df_ptdf             = pd.read_csv(csvptdf,              index_col=0)
+        self.df_gen              = pd.read_csv(csvgen,               index_col=0)
+        self.df_margcost         = pd.read_csv(csvmarginalcost,      index_col=0)
+        self.df_blockmargcost    = pd.read_csv(csvblockmarginalcost, index_col=0)
+        self.df_blockoutputlimit = pd.read_csv(csvblockoutputlimit,  index_col=0)
+        self.enforce_kv_level(230) # Enforce the 230 kV limits
+        self.update_gen_param() # Add start-up/shut-down costs and min on/offline hours
 
+    def enforce_kv_level(self, kv_level):
+        bus_kVlevel_set = set(self.df_bus[self.df_bus['BASEKV']>=kv_level].index)
+        branch_kVlevel_set = {
+            i for i in self.df_branch.index
+            if self.df_branch.loc[i,'F_BUS'] in bus_kVlevel_set 
+            and self.df_branch.loc[i,'T_BUS'] in bus_kVlevel_set
+        }
+        self.set_valid_branch = branch_kVlevel_set
+        self.df_ptdf = self.df_ptdf.loc[self.set_valid_branch,:].copy()
 
+    def update_gen_param(self):
+        # This function add start-up/shut-down costs and min on/offline hours
+        # This iteration-based way is not the most Pythonic, but it gets better readability
+        for i, row in self.df_gen.iterrows():
+            cap    = self.df_gen.loc[i, 'PMAX']
+            s_cost = self.df_gen.loc[i, 'STARTUP']
+            tmin   = self.df_gen.loc[i, 'MINIMUM_UP_TIME']
+            t0     = self.df_gen.loc[i, 'GEN_STATUS']
+            if i.startswith('coal'):
+                if cap <= 300:
+                    # Subcritical steam cycle
+                    s_cost = 16.28*cap
+                    tmin = 4 # Min on/offline time
+                    t0 = tmin # Initial online time
+                else:
+                    # Supercritical steam cycle
+                    s_cost = 29.44*cap
+                    tmin = 12
+                    t0 = tmin
+            elif i.startswith('ng'):
+                if cap <= 50:
+                    # Small aeroderivative turbines
+                    s_cost = 8.23*cap
+                    tmin = 1
+                    t0 = tmin
+                elif cap <= 100:
+                    # Small aeroderivative turbines
+                    s_cost = 8.23*cap
+                    tmin = 3
+                    t0 = tmin
+                elif cap <= 450:
+                    # Heavy-duty GT
+                    s_cost = 1.70*cap
+                    tmin = 5
+                    t0 = tmin
+                else:
+                    # CCGT
+                    s_cost = 1.74*cap
+                    tmin = 8
+                    t0 = tmin
+            elif i.startswith('nuc'):
+                # Supercritical steam cycle
+                s_cost = 29.44*cap
+                tmin = 100
+                t0 = 1 # Nuclear units never go offline
+
+            self.df_gen.loc[i, 'STARTUP']  = s_cost
+            self.df_gen.loc[i, 'SHUTDOWN'] = s_cost
+            self.df_gen.loc[i, 'MINIMUM_UP_TIME']   = tmin
+            self.df_gen.loc[i, 'MINIMUM_DOWN_TIME'] = tmin
+            self.df_gen.loc[i, 'GEN_STATUS'] = t0 # All but nuclear units are free to be go offline
+
+        self.df_gen['STARTUP_RAMP']  = self.df_gen[['STARTUP_RAMP','PMIN']].max(axis=1)
+        self.df_gen['SHUTDOWN_RAMP'] = self.df_gen[['SHUTDOWN_RAMP','PMIN']].max(axis=1)
+
+        # Assume renewable sources cost nothing to start
+        self.df_gen.loc[self.df_gen['GEN_TYPE']=='Renewable', 'STARTUP'] = 0
+
+        # Update 1 hour ramp rates
+        self.df_gen['RAMP_60'] = self.df_gen['RAMP_10']*6
+
+    def return_dict(self, attr, tol=None):
+        # This method is a generic function that converts a Pandas dataframe 
+        # into a dictionary.
+        df = getattr(self, attr)
+        dict_df = dict()
+        if tol:
+            for i in df.index:
+                for j in df.columns:
+                    v = df.loc[i, j]
+                    if abs(v) >= tol:
+                        dict_df[i,j] = v
+        else:
+            for i in df.index:
+                for j in df.columns:
+                    dict_df[i,j] = df.loc[i, j]
+        return dict_df
+
+    def return_dict_ptdf(self, tol=None):
+        # Find out all shift factors that are greater than tolerance, which 
+        # defaults to 1e-5
+        dict_ptdf = self.return_dict('df_ptdf', tol)
+        return dict_ptdf
+
+    def return_dict_blockmargcost(self):
+        dict_blockmargcost = self.return_dict('df_blockmargcost')
+        return dict_blockmargcost
+
+    def return_dict_blockoutputlimit(self):
+        dict_blockoutputlimit = self.return_dict('df_blockoutputlimit')
+        return dict_blockoutputlimit
 
 #=======================================================#
 # INPUT DATA                                            #
@@ -393,8 +504,6 @@ def enforce_ramp_down_limits_rule(m, g, t):
 # Constraints for line capacity limits
 #############################################
 
-print('Building network constraints ...')
-
 def line_flow_rule(m, l, t):
     # This is an expression of the power flow on bus b in time t, defined here
     # to save time.
@@ -652,21 +761,22 @@ def total_cost_objective_rule(m):
    )
 
 def create_model(
-    gen_df,
-    genth_df,
-    wind_generator_names,
-    blockmargcost_df,
-    margcost_df,
+    network,
+    # gen_df,
+    # genth_df,
+    # wind_generator_names,
+    # blockmargcost_df,
+    # margcost_df,
     load_s_df,
-    bus_df,
-    branch_df,
-    valid_id,
+    # bus_df,
+    # branch_df,
+    # valid_id,
     load_df,
-    blockoutputlimit_dict,
-    blockmargcost_dict,
+    # blockoutputlimit_dict,
+    # blockmargcost_dict,
     load_dict,
     genforren_dict,
-    ptdf_dict,
+    # ptdf_dict,
     ReserveFactor,
     RegulatingReserveFactor,
 ):
@@ -676,29 +786,32 @@ def create_model(
     """SETS"""
     ##########################################################
     # String indentifiers for the sets of different types of generators.
-    model.AllGenerators        = Set(initialize=gen_df.index)
-    model.ThermalGenerators    = Set(initialize=gen_df[gen_df['GEN_TYPE']=='Thermal'].index)
-    model.NonThermalGenerators = Set(initialize=gen_df[gen_df['GEN_TYPE']!='Thermal'].index)
-    model.RenewableGenerators  = Set(initialize=gen_df[gen_df['GEN_TYPE']=='Renewable'].index)
-    model.HydroGenerators      = Set(initialize=gen_df[gen_df['GEN_TYPE']=='Hydro'].index)
-    model.WindGenerators       = Set(initialize=wind_generator_names)
+    model.AllGenerators        = Set(initialize=network.df_gen.index)
+    model.ThermalGenerators    = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Thermal'].index)
+    model.NonThermalGenerators = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']!='Thermal'].index)
+    model.RenewableGenerators  = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Renewable'].index)
+    model.HydroGenerators      = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Hydro'].index)
+    model.WindGenerators       = Set(initialize=[i for i in network.df_gen.index if i.startswith('wind')])
 
     # Set of Generator Blocks Set.
-    model.Blocks = Set(initialize = blockmargcost_df.columns)
+    model.Blocks = Set(initialize = network.df_blockmargcost.columns)
 
     # String indentifiers for the set of load buses.
     model.LoadBuses = Set(initialize=load_s_df.columns)
-    model.Buses     = Set(initialize=bus_df.index)
+    model.Buses     = Set(initialize=network.df_bus.index)
 
     # String indentifiers for the set of branches.
-    model.Branches         = Set(initialize=branch_df.index)
-    model.EnforcedBranches = Set(initialize=valid_id)
+    model.Branches         = Set(initialize=network.df_branch.index)
+    model.EnforcedBranches = Set(initialize=network.set_valid_branch)
 
     # PTDF.
-    t0 = time.time()
     # model.PTDF = Param(model.Buses, model.Branches, within=Reals, initialize=ptdf_dict)
-    model.PTDF = Param(model.Branches, model.Buses, within=Reals, initialize=ptdf_dict)
-    print(time.time() - t0)
+    model.PTDF = Param(
+        model.Branches, model.Buses,
+        within=Reals,
+        initialize=network.return_dict_ptdf(tol=None),
+        default=0.0
+    )
 
     # The number of time periods under consideration, in addition to the corresponding set.
     model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(load_df.index))
@@ -707,13 +820,14 @@ def create_model(
     """PARAMETERS"""
     ##########################################################
     # Buses indexed by all generators.
-    model.GenBuses = Param(model.AllGenerators, initialize=gen_df['GEN_BUS'].to_dict())
+    model.GenBuses = Param(model.AllGenerators, initialize=network.df_gen['GEN_BUS'].to_dict())
 
     # Line capacity limits indexed by branches, units are MW.
     model.LineLimits = Param(
         model.Branches,
         # model.EnforcedBranches,
-        within=NonNegativeReals, initialize = branch_df['RATE_A'].to_dict()
+        within=NonNegativeReals,
+        initialize = network.df_branch['RATE_A'].to_dict()
     )
 
     # The global system demand, for each time period. units are MW.
@@ -730,7 +844,7 @@ def create_model(
     model.BusVOLL = Param(
         model.LoadBuses,
         within=NonNegativeReals,
-        initialize=bus_df[ bus_df['PD']>0 ][ 'VOLL' ].to_dict()
+        initialize=network.df_bus[ network.df_bus['PD']>0 ][ 'VOLL' ].to_dict()
     )
 
     # Power forecasts for renewables indexed by (gen, time)
@@ -739,19 +853,19 @@ def create_model(
         within=NonNegativeReals, initialize=genforren_dict, mutable=True
     )
 
-    # The global system reserve requirements, for each time period, units are MW.
-    model.ReserveRequirements = Param(
-        model.TimePeriods,
-        initialize=0.0, within=NonNegativeReals, default=0.0
-    )
+    i_thermal = (network.df_gen['GEN_TYPE']=='Thermal')
 
     model.MinimumPowerOutput = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['PMIN'].to_dict()
+        # within=NonNegativeReals, initialize=genth_df['PMIN'].to_dict()
+        within=NonNegativeReals,
+        initialize=network.df_gen.loc[i_thermal, 'PMIN'].to_dict()
     )
     model.MaximumPowerOutput = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['PMAX'].to_dict(),
+        # within=NonNegativeReals, initialize=genth_df['PMAX'].to_dict(),
+        within=NonNegativeReals, 
+        initialize=network.df_gen.loc[i_thermal, 'PMAX'].to_dict(),
         validate=maximum_power_output_validator
     )
 
@@ -759,22 +873,26 @@ def create_model(
     # Limits for normal time periods
     model.NominalRampUpLimit   = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['RAMP_60'].to_dict()
+        within=NonNegativeReals,
+        initialize=network.df_gen.loc[i_thermal, 'RAMP_60'].to_dict(),
     )
     model.NominalRampDownLimit = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['RAMP_60'].to_dict()
+        within=NonNegativeReals, 
+        initialize=network.df_gen.loc[i_thermal, 'RAMP_60'].to_dict(),
     )
 
     # Limits for start-up/shut-down
     model.StartupRampLimit  = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['RAMP_60'].to_dict(),
+        within=NonNegativeReals,
+        initialize=network.df_gen.loc[i_thermal, 'RAMP_60'].to_dict(),
         validate=at_least_generator_minimum_output_validator
     )
     model.ShutdownRampLimit = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['RAMP_60'].to_dict(),
+        within=NonNegativeReals,
+        initialize=network.df_gen.loc[i_thermal, 'RAMP_60'].to_dict(),
         validate=at_least_generator_minimum_output_validator
     )
 
@@ -782,40 +900,50 @@ def create_model(
     model.MinimumUpTime = Param(
         model.ThermalGenerators,
         within=NonNegativeIntegers,
-        initialize=genth_df['MINIMUM_UP_TIME'].to_dict(), mutable=True
+        initialize=network.df_gen.loc[i_thermal, 'MINIMUM_UP_TIME'].to_dict(),
+        mutable=True
     )
     model.MinimumDownTime = Param(
         model.ThermalGenerators,
         within=NonNegativeIntegers,
-        initialize=genth_df['MINIMUM_DOWN_TIME'].to_dict(), mutable=True
+        initialize=network.df_gen.loc[i_thermal, 'MINIMUM_DOWN_TIME'].to_dict(),
+        mutable=True
     )
 
     model.UnitOnT0State = Param(
         model.ThermalGenerators,
-        within=Integers, initialize=genth_df['GEN_STATUS'].to_dict(),
-        validate=t0_state_nonzero_validator, mutable=True
+        within=Integers,
+        initialize=network.df_gen.loc[i_thermal, 'GEN_STATUS'].to_dict(),
+        validate=t0_state_nonzero_validator,
+        mutable=True
     )
 
     model.UnitOnT0 = Param(
         model.ThermalGenerators,
-        within=Binary, initialize=t0_unit_on_rule, mutable=True
+        within=Binary,
+        initialize=t0_unit_on_rule,
+        mutable=True
     )
 
     model.InitialTimePeriodsOnLine = Param(
         model.ThermalGenerators,
-        within=NonNegativeIntegers, initialize=initial_time_periods_online_rule,
+        within=NonNegativeIntegers,
+        initialize=initial_time_periods_online_rule,
         mutable=True
     )
     model.InitialTimePeriodsOffLine = Param(
         model.ThermalGenerators,
-        within=NonNegativeIntegers, initialize=initial_time_periods_offline_rule,
+        within=NonNegativeIntegers,
+        initialize=initial_time_periods_offline_rule,
         mutable=True
     )
 
     # Generator power output at t=0 (initial condition). units are MW.
     model.PowerGeneratedT0 = Param(
         model.AllGenerators, 
-        within=NonNegativeReals, initialize=gen_df['PMIN'].to_dict(), mutable=True
+        within=NonNegativeReals,
+        initialize=network.df_gen.loc[i_thermal, 'PMIN'].to_dict(),
+        mutable=True
     )
 
     # Production cost coefficients (for the quadratic) 
@@ -835,33 +963,35 @@ def create_model(
     # ) # units are $/(MWhr^2).
     model.BlockMarginalCost = Param(
         model.ThermalGenerators, model.Blocks, 
-        within=NonNegativeReals, initialize=blockmargcost_dict
+        within=NonNegativeReals,
+        initialize=network.return_dict_blockmargcost()
     )
     # Number of cost function blockes indexed by (gen, block)
-    #model.GenNumBlocks = Param(model.ThermalGenerators, initialize=margcost_df['nblock'].to_dict())
     model.BlockSize = Param(
         model.ThermalGenerators, model.Blocks,
-        initialize=blockoutputlimit_dict
+        initialize=network.return_dict_blockoutputlimit()
     )
 
     model.BlockSize0 = Param(
         model.ThermalGenerators,
-        initialize=margcost_df['Pmax0'].to_dict()
+        initialize=network.df_margcost['Pmax0'].to_dict()
     )
     model.BlockMarginalCost0 = Param(
         model.ThermalGenerators,
-        initialize=margcost_df['nlcost'].to_dict()
+        initialize=network.df_margcost['nlcost'].to_dict()
     )
 
     # Shutdown and startup cost for each generator, in the literature, these are 
     # often set to 0.
     model.ShutdownCostCoefficient = Param(
         model.ThermalGenerators,
-        within=NonNegativeReals, initialize=genth_df['SHUTDOWN'].to_dict()
+        within=NonNegativeReals,
+        initialize=network.df_gen.loc[i_thermal, 'SHUTDOWN'].to_dict(),
     ) # units are $.
     model.StartupCostCoefficient = Param(
         model.ThermalGenerators, 
-        within=NonNegativeReals, initialize=genth_df['STARTUP'].to_dict()
+        within=NonNegativeReals,
+        initialize=network.df_gen.loc[i_thermal, 'STARTUP'].to_dict(),
     ) # units are $.
 
     model.ReserveFactor = Param(
