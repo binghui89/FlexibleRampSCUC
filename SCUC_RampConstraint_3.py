@@ -37,8 +37,24 @@ import pandas as pd
 import numpy as np
 from pyomo.environ import *
 from pyomo.opt import SolverFactory
+from pandas import DataFrame
 import time
 from IPython import embed as IP
+
+class MyDataFrame(DataFrame):
+    def to_dict_2d(self, tol=None):
+        dict_df = dict()
+        if tol:
+            for i in self.index:
+                for j in self.columns:
+                    v = self.loc[i, j]
+                    if abs(v) >= tol:
+                        dict_df[i,j] = v
+        else:
+            for i in self.index:
+                for j in self.columns:
+                    dict_df[i,j] = self.loc[i, j]
+        return dict_df
 
 class Network(object):
     def __init__(self, csvbus, csvbranch, csvptdf, csvgen, csvmarginalcost, csvblockmarginalcost, csvblockoutputlimit):
@@ -762,21 +778,8 @@ def total_cost_objective_rule(m):
 
 def create_model(
     network,
-    # gen_df,
-    # genth_df,
-    # wind_generator_names,
-    # blockmargcost_df,
-    # margcost_df,
-    load_s_df,
-    # bus_df,
-    # branch_df,
-    # valid_id,
-    load_df,
-    # blockoutputlimit_dict,
-    # blockmargcost_dict,
-    load_dict,
-    genforren_dict,
-    # ptdf_dict,
+    df_busload, # Only bus load, first dimension time starts from 1, no total load
+    df_genfor_nonthermal, # Only generation from nonthermal gens, first dim time starts from 1
     ReserveFactor,
     RegulatingReserveFactor,
 ):
@@ -786,9 +789,10 @@ def create_model(
     """SETS"""
     ##########################################################
     # String indentifiers for the sets of different types of generators.
+    i_thermal = (network.df_gen['GEN_TYPE']=='Thermal')
     model.AllGenerators        = Set(initialize=network.df_gen.index)
-    model.ThermalGenerators    = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Thermal'].index)
-    model.NonThermalGenerators = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']!='Thermal'].index)
+    model.ThermalGenerators    = Set(initialize=network.df_gen[i_thermal].index)
+    model.NonThermalGenerators = Set(initialize=network.df_gen[~i_thermal].index)
     model.RenewableGenerators  = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Renewable'].index)
     model.HydroGenerators      = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Hydro'].index)
     model.WindGenerators       = Set(initialize=[i for i in network.df_gen.index if i.startswith('wind')])
@@ -797,7 +801,8 @@ def create_model(
     model.Blocks = Set(initialize = network.df_blockmargcost.columns)
 
     # String indentifiers for the set of load buses.
-    model.LoadBuses = Set(initialize=load_s_df.columns)
+    # model.LoadBuses = Set(initialize=load_s_df.columns)
+    model.LoadBuses = Set(initialize=df_busload.columns)
     model.Buses     = Set(initialize=network.df_bus.index)
 
     # String indentifiers for the set of branches.
@@ -814,7 +819,8 @@ def create_model(
     )
 
     # The number of time periods under consideration, in addition to the corresponding set.
-    model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(load_df.index))
+    # model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(load_df.index))
+    model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(df_busload.index))
     model.TimePeriods    = RangeSet(1, model.NumTimePeriods)
 
     """PARAMETERS"""
@@ -831,16 +837,28 @@ def create_model(
     )
 
     # The global system demand, for each time period. units are MW.
+    # model.Demand = Param(
+    #     model.TimePeriods,
+    #     within=NonNegativeReals, initialize=load_df['LOAD'].to_dict(), mutable=True
+    # )
     model.Demand = Param(
         model.TimePeriods,
-        within=NonNegativeReals, initialize=load_df['LOAD'].to_dict(), mutable=True
+        within=NonNegativeReals, 
+        initialize=df_busload.sum(axis=1).to_dict(), 
+        mutable=True
     )
 
     # The bus-by-bus demand and value of loss load, for each time period. units are MW and $/MW.
+    # model.BusDemand = Param(
+    #     model.LoadBuses, model.TimePeriods,
+    #     within=NonNegativeReals, initialize=load_dict, mutable=True
+    # )
     model.BusDemand = Param(
         model.LoadBuses, model.TimePeriods,
-        within=NonNegativeReals, initialize=load_dict, mutable=True
-    )
+        within=NonNegativeReals,
+        initialize=MyDataFrame(df_busload.T).to_dict_2d(), 
+        mutable=True
+    ) # Transpose because the first index of model.BusDemand is bus, not time.
     model.BusVOLL = Param(
         model.LoadBuses,
         within=NonNegativeReals,
@@ -848,12 +866,16 @@ def create_model(
     )
 
     # Power forecasts for renewables indexed by (gen, time)
+    # model.PowerForecast = Param(
+    #     model.NonThermalGenerators, model.TimePeriods,
+    #     within=NonNegativeReals, initialize=genforren_dict, mutable=True
+    # )
     model.PowerForecast = Param(
         model.NonThermalGenerators, model.TimePeriods,
-        within=NonNegativeReals, initialize=genforren_dict, mutable=True
+        within=NonNegativeReals,
+        initialize=MyDataFrame(df_genfor_nonthermal.T).to_dict_2d(),
+        mutable=True
     )
-
-    i_thermal = (network.df_gen['GEN_TYPE']=='Thermal')
 
     model.MinimumPowerOutput = Param(
         model.ThermalGenerators,
