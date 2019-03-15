@@ -453,7 +453,7 @@ def enforce_max_available_ramp_up_rates_rule(m, g, t):
     #                                    limit plus maximum power generated (
     #                                    degenerate upper bound due to unit off)
     # (1, 1) - unit staying on:    RHS = standard ramp limit
-    if t == 1: # Maybe we can use m.TimePeriod.first() here
+    if t == m.TimePeriods.first():
         return m.MaximumPowerAvailable[g, t] <= (
             m.PowerGeneratedT0[g] 
             + m.NominalRampUpLimit[g] * m.UnitOnT0[g] 
@@ -462,9 +462,9 @@ def enforce_max_available_ramp_up_rates_rule(m, g, t):
         )
     else:
         return m.MaximumPowerAvailable[g, t] <= (
-            m.PowerGenerated[g, t-1] 
-            + m.NominalRampUpLimit[g] * m.UnitOn[g, t-1] 
-            + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, t-1]) 
+            m.PowerGenerated[g, m.TimePeriods.prev(t)] 
+            + m.NominalRampUpLimit[g] * m.UnitOn[g, m.TimePeriods.prev(t)] 
+            + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.prev(t)]) 
             + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
         )
 
@@ -479,12 +479,12 @@ def enforce_max_available_ramp_down_rates_rule(m, g, t):
     # (1, 0) - unit switching off: RHS = shutdown ramp limit
     # (1, 1) - unit staying on:    RHS = maximum generator output (degenerate 
     #                                    upper bound)
-    if t == value(m.NumTimePeriods): # Maybe we can use m.TimePeriod.last() here
+    if t == m.TimePeriods.last(): # Maybe we can use m.TimePeriod.last() here
         return Constraint.Skip
     else:
         return m.MaximumPowerAvailable[g, t] <= (
-            m.MaximumPowerOutput[g] * m.UnitOn[g, t+1] 
-            + m.ShutdownRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, t+1])
+            m.MaximumPowerOutput[g] * m.UnitOn[g, m.TimePeriods.next(t)] 
+            + m.ShutdownRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.next(t)])
         )
 
 # the following constraint encodes Constraint 20 defined in Carrion and Arroyo.
@@ -499,7 +499,7 @@ def enforce_ramp_down_limits_rule(m, g, t):
     #                                    strangest case.
     # (1, 0) - unit switching off: RHS = shutdown ramp limit 
     # (1, 1) - unit staying on:    RHS = standard ramp-down limit 
-    if t == 1:
+    if t == m.TimePeriods.first():
         return m.PowerGeneratedT0[g] - m.PowerGenerated[g, t] <= (
             m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
             + m.ShutdownRampLimit[g] * (m.UnitOnT0[g] - m.UnitOn[g, t]) 
@@ -507,13 +507,13 @@ def enforce_ramp_down_limits_rule(m, g, t):
         )
     else:
         return (
-            m.PowerGenerated[g, t-1] 
+            m.PowerGenerated[g, m.TimePeriods.prev(t)] 
             - m.PowerGenerated[g, t] 
             - m.RegulatingReserveDnAvailable[g,t]
         ) <= (
             m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
-            + m.ShutdownRampLimit[g] * (m.UnitOn[g, t-1] - m.UnitOn[g, t]) 
-            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t-1])
+            + m.ShutdownRampLimit[g] * (m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]) 
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, m.TimePeriods.prev(t)])
         )
 
 #############################################
@@ -550,20 +550,25 @@ def enforce_up_time_constraints_initial(m, g):
         return Constraint.Skip
     return sum(
         (1 - m.UnitOn[g, t]) 
-        for g in m.ThermalGenerators 
-        for t in m.TimePeriods if t <= value(m.InitialTimePeriodsOnLine[g])
+        # for g in m.ThermalGenerators 
+        for t in m.TimePeriods
+        if m.TimePeriods.value.index(t) < value(m.InitialTimePeriodsOnLine[g])
     ) == 0.0
 
 # Constraint for each time period after that not involving the initial condition.
 def enforce_up_time_constraints_subsequent(m, g, t):
-    if t <= value(m.InitialTimePeriodsOnLine[g]):
-        # handled by the EnforceUpTimeConstraintInitial constraint.
+    # Index of time interval starting from 1, plus one since Python index starts 
+    # from 0
+    i_t = m.TimePeriods.value.index(t) + 1
+    if i_t <= value(m.InitialTimePeriodsOnLine[g]):
+        # Handled by the EnforceUpTimeConstraintInitial constraint. 
         return Constraint.Skip
-    elif t <= (value(m.NumTimePeriods) - value(m.MinimumUpTime[g]) + 1): # Maybe only use one value
+    elif i_t <= (value(m.NumTimePeriods) - value(m.MinimumUpTime[g]) + 1): # Maybe only use one value
         # The right-hand side terms below are only positive if the unit was off 
         # in time (t - 1) but on in time t, and the value is the minimum number 
         # of subsequent consecutive time periods that the unit must be on.
-        if t is 1:
+        # Note time step in m.TimePeriods must be 1 for this constraint to work. 
+        if t is m.TimePeriods.first():
             return sum(
                 m.UnitOn[g, n] 
                 for n in m.TimePeriods 
@@ -574,19 +579,19 @@ def enforce_up_time_constraints_subsequent(m, g, t):
                 m.UnitOn[g, n] 
                 for n in m.TimePeriods 
                 if n >= t and n <= t + value(m.MinimumUpTime[g]) - 1
-            ) >= m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOn[g, t-1])
+            ) >= m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.prev(t)])
     else:
         # Handle the final (MinimumUpTime[g] - 1) time periods - if a unit is 
         # started up in this interval, it must remain on-line until the end of 
         # the time span.
-        if t == 1: # can happen when small time horizons are specified
+        if t == m.TimePeriods.first(): # can happen when small time horizons are specified
             return sum(
                 m.UnitOn[g, n] - (m.UnitOn[g, t] - m.UnitOnT0[g])
                 for n in m.TimePeriods if n >= t
             ) >= 0.0
         else:
             return sum(
-                m.UnitOn[g, n] - (m.UnitOn[g, t] - m.UnitOn[g, t-1]) 
+                m.UnitOn[g, n] - (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.prev(t)]) 
                 for n in m.TimePeriods if n >= t
             ) >= 0.0
 
@@ -600,21 +605,25 @@ def enforce_down_time_constraints_initial(m, g):
       return Constraint.Skip
    return sum(
        m.UnitOn[g, t] 
-       for g in m.ThermalGenerators 
-       for t in m.TimePeriods if t <= value(m.InitialTimePeriodsOffLine[g])
+    #    for g in m.ThermalGenerators 
+       for t in m.TimePeriods
+       if m.TimePeriods.value.index(t) < value(m.InitialTimePeriodsOffLine[g])
    ) == 0.0
 
 
 # constraint for each time period after that not involving the initial condition.
 def enforce_down_time_constraints_subsequent(m, g, t):
-    if t <= value(m.InitialTimePeriodsOffLine[g]):
+    # Index of time interval starting from 1, plus one since Python index starts
+    # from 0
+    i_t = m.TimePeriods.value.index(t) + 1
+    if i_t <= value(m.InitialTimePeriodsOffLine[g]):
         # handled by the EnforceDownTimeConstraintInitial constraint.
         return Constraint.Skip
-    elif t <= (value(m.NumTimePeriods) - value(m.MinimumDownTime[g]) + 1):
+    elif i_t <= (value(m.NumTimePeriods) - value(m.MinimumDownTime[g]) + 1):
         # The right-hand side terms below are only positive if the unit was on 
         # in time (t - 1) but on in time, and the value is the minimum number of 
         # subsequent consecutive time periods that the unit must be on.
-        if t is 1:
+        if t is m.TimePeriods.first():
             return sum(
                 1 - m.UnitOn[g, n]
                 for n in m.TimePeriods 
@@ -625,19 +634,19 @@ def enforce_down_time_constraints_subsequent(m, g, t):
                 1 - m.UnitOn[g, n] 
                 for n in m.TimePeriods 
                 if n >= t and n <= t + value(m.MinimumDownTime[g]) - 1
-            ) >= m.MinimumDownTime[g] * (m.UnitOn[g, t-1] - m.UnitOn[g, t])
+            ) >= m.MinimumDownTime[g] * (m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t])
     else:
         # handle the final (MinimumDownTime[g] - 1) time periods - if a unit is 
         # shut down in this interval, it must remain off-line until the end of 
         # the time span.
-        if t == 1: # can happen when small time horizons are specified
+        if t is m.TimePeriods.first(): # can happen when small time horizons are specified
             return sum(
                 (1 - m.UnitOn[g, n]) - (m.UnitOnT0[g] - m.UnitOn[g, t])
                 for n in m.TimePeriods if n >= t
             ) >= 0.0
         else:
             return sum(
-                (1 - m.UnitOn[g, n]) - (m.UnitOn[g, t-1] - m.UnitOn[g, t]) 
+                (1 - m.UnitOn[g, n]) - (m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]) 
                 for n in m.TimePeriods if n >= t
             ) >= 0.0
 
@@ -731,16 +740,24 @@ def compute_total_production_cost_rule(m):
 
 # Compute the per-generator, per-time period shut-down and start-up costs.
 def compute_shutdown_costs_rule(m, g, t):
-   if t is 1: # Maybe replace with .first()
-      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (m.UnitOnT0[g] - m.UnitOn[g, t])
+   if t is m.TimePeriods.first():
+      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (
+          m.UnitOnT0[g] - m.UnitOn[g, t]
+      )
    else:
-      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (m.UnitOn[g, t-1] - m.UnitOn[g, t])
+      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (
+          m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]
+      )
 
 def compute_startup_costs_rule(m, g, t):
-   if t is 1: # Maybe replace with .first()
-      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (-m.UnitOnT0[g] + m.UnitOn[g, t])
+   if t is m.TimePeriods.first():
+      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (
+          -m.UnitOnT0[g] + m.UnitOn[g, t]
+      )
    else:
-      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (-m.UnitOn[g, t-1] + m.UnitOn[g, t])
+      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (
+          -m.UnitOn[g, m.TimePeriods.prev(t)] + m.UnitOn[g, t]
+      )
 
 # Compute the total startup and shutdown costs, across all generators and time periods.
 def compute_total_fixed_cost_rule(m):
@@ -782,6 +799,7 @@ def create_model(
     df_genfor_nonthermal, # Only generation from nonthermal gens, first dim time starts from 1
     ReserveFactor,
     RegulatingReserveFactor,
+    nI, # Number of intervals in an hour
 ):
     model = ConcreteModel()
     model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
@@ -821,7 +839,8 @@ def create_model(
     # The number of time periods under consideration, in addition to the corresponding set.
     # model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(load_df.index))
     model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(df_busload.index))
-    model.TimePeriods    = RangeSet(1, model.NumTimePeriods)
+    # model.TimePeriods    = RangeSet(1, model.NumTimePeriods)
+    model.TimePeriods    = Set(initialize=df_busload.index, ordered=True)
 
     """PARAMETERS"""
     ##########################################################
@@ -896,25 +915,25 @@ def create_model(
     model.NominalRampUpLimit   = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=network.df_gen.loc[i_thermal, 'RAMP_60'].to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'RAMP_10']).to_dict(),
     )
     model.NominalRampDownLimit = Param(
         model.ThermalGenerators,
         within=NonNegativeReals, 
-        initialize=network.df_gen.loc[i_thermal, 'RAMP_60'].to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'RAMP_10']).to_dict(),
     )
 
     # Limits for start-up/shut-down
     model.StartupRampLimit  = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=network.df_gen.loc[i_thermal, 'RAMP_60'].to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'STARTUP_RAMP']).to_dict(),
         validate=at_least_generator_minimum_output_validator
     )
     model.ShutdownRampLimit = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=network.df_gen.loc[i_thermal, 'RAMP_60'].to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'SHUTDOWN_RAMP']).to_dict(),
         validate=at_least_generator_minimum_output_validator
     )
 
@@ -922,20 +941,20 @@ def create_model(
     model.MinimumUpTime = Param(
         model.ThermalGenerators,
         within=NonNegativeIntegers,
-        initialize=network.df_gen.loc[i_thermal, 'MINIMUM_UP_TIME'].to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'MINIMUM_UP_TIME']*nI).to_dict(),
         mutable=True
     )
     model.MinimumDownTime = Param(
         model.ThermalGenerators,
         within=NonNegativeIntegers,
-        initialize=network.df_gen.loc[i_thermal, 'MINIMUM_DOWN_TIME'].to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'MINIMUM_DOWN_TIME']*nI).to_dict(),
         mutable=True
     )
 
     model.UnitOnT0State = Param(
         model.ThermalGenerators,
         within=Integers,
-        initialize=network.df_gen.loc[i_thermal, 'GEN_STATUS'].to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'GEN_STATUS']*nI).to_dict(),
         validate=t0_state_nonzero_validator,
         mutable=True
     )
