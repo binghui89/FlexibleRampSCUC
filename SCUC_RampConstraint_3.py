@@ -393,7 +393,7 @@ def definition_hourly_curtailment_rule(m, t):
    return m.Curtailment[t] == sum(m.BusCurtailment[b, t] for b in m.LoadBuses)
 
 def production_equals_demand_rule(m, t):
-   return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) == m.Demand[t] - m.Curtailment[t]
+   return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) + m.Curtailment[t] == m.Demand[t]
 
 #############################################
 # generation limit and ramping constraints
@@ -791,7 +791,7 @@ def total_cost_objective_rule(m):
        + m.TotalFixedCost
        + m.TotalCurtailmentCost
        + m.TotalReserveShortageCost
-   )
+   ) 
 
 def create_model(
     network,
@@ -799,7 +799,10 @@ def create_model(
     df_genfor_nonthermal, # Only generation from nonthermal gens, first dim time starts from 1
     ReserveFactor,
     RegulatingReserveFactor,
-    nI, # Number of intervals in an hour
+    nI, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
+    dict_UnitOnT0State=None, # How many time periods the units have been on at T0 from last RTUC model
+    dict_PowerGeneratedT0=None, # Initial power generation level at T0 from last RTUC model
+    dict_uniton_da=None, # Slow units commitment statuses from DAUC model
 ):
     model = ConcreteModel()
     model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
@@ -814,6 +817,17 @@ def create_model(
     model.RenewableGenerators  = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Renewable'].index)
     model.HydroGenerators      = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Hydro'].index)
     model.WindGenerators       = Set(initialize=[i for i in network.df_gen.index if i.startswith('wind')])
+
+    if dict_uniton_da:
+        set_slow = set( i[0] for i in dict_uniton_da.iterkeys() )
+        # model.ThermalGenerators_slow = Set(
+        #     initialize=set_slow,
+        #     within=model.ThermalGenerators
+        # )
+        # model.ThermalGenerators_fast = Set(
+        #     initialize=model.ThermalGenerators.value.difference(set_slow),
+        #     within=model.ThermalGenerators
+        # )
 
     # Set of Generator Blocks Set.
     model.Blocks = Set(initialize = network.df_blockmargcost.columns)
@@ -951,13 +965,23 @@ def create_model(
         mutable=True
     )
 
-    model.UnitOnT0State = Param(
-        model.ThermalGenerators,
-        within=Integers,
-        initialize=(network.df_gen.loc[i_thermal, 'GEN_STATUS']*nI).to_dict(),
-        validate=t0_state_nonzero_validator,
-        mutable=True
-    )
+    if dict_UnitOnT0State:
+        # Use unit commitment statuses from previous RTUC solutions
+        model.UnitOnT0State = Param(
+            model.ThermalGenerators,
+            within=Integers,
+            initialize=dict_UnitOnT0State,
+            validate=t0_state_nonzero_validator,
+            mutable=True
+        )
+    else:
+        model.UnitOnT0State = Param(
+            model.ThermalGenerators,
+            within=Integers,
+            initialize=(network.df_gen.loc[i_thermal, 'GEN_STATUS']*nI).to_dict(),
+            validate=t0_state_nonzero_validator,
+            mutable=True
+        )
 
     model.UnitOnT0 = Param(
         model.ThermalGenerators,
@@ -980,12 +1004,21 @@ def create_model(
     )
 
     # Generator power output at t=0 (initial condition). units are MW.
-    model.PowerGeneratedT0 = Param(
-        model.AllGenerators, 
-        within=NonNegativeReals,
-        initialize=network.df_gen.loc[i_thermal, 'PMIN'].to_dict(),
-        mutable=True
-    )
+    if dict_PowerGeneratedT0:
+        # Use power generation levels from previous RTUC solutions
+        model.PowerGeneratedT0 = Param(
+            model.AllGenerators, 
+            within=NonNegativeReals,
+            initialize=dict_PowerGeneratedT0,
+            mutable=True
+        )
+    else:
+        model.PowerGeneratedT0 = Param(
+            model.AllGenerators, 
+            within=NonNegativeReals,
+            initialize=network.df_gen.loc[i_thermal, 'PMIN'].to_dict(),
+            mutable=True
+        )
 
     # Production cost coefficients (for the quadratic) 
     # a0=constant, a1=linear coefficient, a2=quadratic coefficient.
@@ -1091,6 +1124,9 @@ def create_model(
         model.ThermalGenerators, model.TimePeriods,
         within=Binary, initialize=0
     )
+    if dict_uniton_da:
+        for k in dict_uniton_da.iterkeys():
+            model.UnitOn[k].fix(dict_uniton_da[k])
     # Amount of power produced by each generator, at each time period.
     model.PowerGenerated = Var(
         model.AllGenerators, model.TimePeriods,

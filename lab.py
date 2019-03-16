@@ -655,39 +655,18 @@ def return_powergenerated_t_end(instance):
         dict_results[g] = value(instance.PowerGenerated[g, t_end])
     return dict_results
 
-def update_instance(
-    instance, 
-    dict_UnitOnT0State, 
-    dict_PowerGeneratedT0,
-    dict_UnitOn_slow,
-):
-    if dict_UnitOnT0State:
-        instance.UnitOnT0State.store_values(dict_UnitOnT0State)
-        flag_UnitOnT0State = True
-    else:
-        flag_UnitOnT0State = False
+def examine_load():
+    df_load_da = pd.read_csv('/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv', index_col=0)
+    df_load_ha = pd.read_csv('/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv', index_col=['Slot'])
 
-    if dict_PowerGeneratedT0:
-        instance.PowerGeneratedT0.store_values(dict_PowerGeneratedT0)
-        flag_PowerGeneratedT0 = True
-    else:
-        flag_PowerGeneratedT0 = False
+    df_load = pd.DataFrame(index=df_load_ha.index)
+    for i in df_load.index:
+        h = (i-1)/4+1
+        df_load.loc[i, 'DA'] = df_load_da.loc[h, df_load_da.columns.difference(['LOAD'])].sum()
+        df_load.loc[i, 'HA'] = df_load_ha.loc[i, df_load_ha.columns.difference(['LOAD'])].sum()
 
-    if dict_UnitOn_slow:
-        for k in dict_UnitOn_slow.iterkeys(): # Iteritems?
-            v = int(dict_UnitOn_slow[k])
-            instance.UnitOn[k].set_value(v)
-            instance.UnitOn[k].fix()
-        flag_UnitOn_slow = True
-    else:
-        flag_UnitOn_slow = False
+    IP()
 
-    if flag_UnitOnT0State|flag_PowerGeneratedT0|flag_UnitOn_slow:
-        instance.preprocess()
-        flag_updated = True
-    else:
-        flag_updated = False
-    return instance, flag_updated
 
 if __name__ == "__main__":
     # independent_run_10_case(2012, 5, 10, True)
@@ -750,17 +729,17 @@ if __name__ == "__main__":
 
     # extract_all_scenarios()
 
-    csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
-    csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
-    csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
-    csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
-    csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
-    csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
-    csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
-    csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
-    csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
-    csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/ha_load.csv'
-    csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/ha_generator.csv'
+    # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
+    # csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
+    # csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
+    # csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
+    # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
+    # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
+    # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
+    # csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
+    # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
+    # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/ha_load.csv'
+    # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/ha_generator.csv'
 
     df_timesequence = pd.DataFrame(columns=['tH', 'tQ', 't5'], dtype='int')
     for i in range(1, 25):
@@ -771,17 +750,17 @@ if __name__ == "__main__":
                 df_timesequence.loc[index, 'tQ'] = (i-1)*4 + j
                 df_timesequence.loc[index, 't5'] = index
 
-    # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
-    # csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
-    # csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
-    # csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
-    # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
-    # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
-    # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
-    # csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
-    # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
-    # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
-    # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_generator.csv'
+    csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
+    csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
+    csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
+    csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
+    csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
+    csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
+    csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
+    csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
+    csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
+    csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
+    csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_generator.csv'
 
     network = Network(csv_bus, csv_branch, csv_ptdf, csv_gen, csv_marginalcost, csv_blockmarginalcost, csv_blockoutputlimit)
     network.df_bus['VOLL'] = 9000
@@ -808,7 +787,7 @@ if __name__ == "__main__":
     print('Model created at: {:>.2f} s'.format(time() - t0))
 
     instance = model
-    optimizer = SolverFactory('gurobi')
+    optimizer = SolverFactory('cplex')
     results = optimizer.solve(instance)
     instance.solutions.load_from(results)
     print(
@@ -832,24 +811,28 @@ if __name__ == "__main__":
 
     # Obtain commitment statuses of slow-starting units from DAUC model
     df_uniton_da = MyDataFrame(index=df_genfor_ha.index)
-    # for i in df_uniton_da.index:
-    #     h = (i-1)/4 + 1
-    #     for g in instance.ThermalGenerators:
-    #         if value(instance.MinimumUpTime[g]) > 1:
-    #             df_uniton_da.loc[i, g] = value(instance.UnitOn[g, h])
     for g, h in instance.UnitOn.iterkeys():
         if value(instance.MinimumUpTime[g]) > 1:
             v = int(value(instance.UnitOn[g, h]))
             for i in range(4*(h-1)+1, 4*h+1):
                 df_uniton_da.loc[i, g] = v
 
+    # RTUC initiation parameters
     dict_UnitOnT0State     = None
     dict_PowerGeneratedT0  = None
 
+    # network.df_gen.loc[network.df_gen['MINIMUM_DOWN_TIME']==1, 'MINIMUM_DOWN_TIME'] = 0.25
+    # network.df_gen.loc[network.df_gen['MINIMUM_UP_TIME']==1, 'MINIMUM_UP_TIME'] = 0.25
+
+    # Start sequential run
     ls_instance = list()
     for t in range(1, 25):
         t_start = 4*(t-1) + 1
         t_end   = 4*t
+
+        dict_uniton_da = MyDataFrame(
+            df_uniton_da.loc[t_start: t_end, :].T
+        ).to_dict_2d()
 
         # Create RTUC model
         i = create_model(
@@ -858,24 +841,12 @@ if __name__ == "__main__":
             df_genfor_ha.loc[t_start: t_end, :],
             ReserveFactor,
             RegulatingReserveFactor,
-            nI=nI_ha,
-        )
-        print "Model {} created!".format(t)
-
-        # Update RTUC model
-        dict_uniton_da = MyDataFrame(
-            df_uniton_da.loc[t_start: t_end, :].T
-        ).to_dict_2d()
-        # IP()
-        i, flag_updated = update_instance(
-            i, 
+            nI_ha,
             dict_UnitOnT0State, 
             dict_PowerGeneratedT0,
-            # None,
             dict_uniton_da,
         )
-        if flag_updated:
-            print "Model {} updated!".format(t)
+        print "Model {} created!".format(t)
 
         # Solve RTUC model
         results = optimizer.solve(i)
@@ -892,4 +863,3 @@ if __name__ == "__main__":
         # Extract initial parameters for the next RTUC run
         dict_UnitOnT0State    = return_unitont0state(i)
         dict_PowerGeneratedT0 = return_powergenerated_t_end(i)
-
