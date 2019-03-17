@@ -635,24 +635,35 @@ def run_model_day(syear, smonth, sday):
 ################################################################################
 # End of Cong's one year run
 
-def return_unitont0state(instance):
-    # Find number of online/offline time intervals of thermal gens at t = 0
+def return_unitont0state(instance, t=None):
+    # Find number of online/offline time intervals of thermal gens at period t
+    if not t:
+        t = instance.TimePeriods.last()
+    elif t not in instance.TimePeriods:
+        print "WARNING: NO UNIT_ON CREATED."
+        return None
     dict_results = dict()
     for g in instance.ThermalGenerators.iterkeys():
         t_on  = max(0, value(instance.UnitOnT0State[g]))
         t_off = max(0, -value(instance.UnitOnT0State[g]))
-        for t in instance.TimePeriods.iterkeys():
-            b = value(instance.UnitOn[g, t])
-            t_on  = b*(t_on + b) # Number of the last consecutive online hours
-            t_off = (1-b)*(t_off + 1 - b) # Number of the last consecutive offline hours
+        for tau in instance.TimePeriods.iterkeys():
+            if instance.TimePeriods.value.index(tau) <= instance.TimePeriods.value.index(t):
+                b = value(instance.UnitOn[g, tau])
+                t_on  = b*(t_on + b) # Number of the last consecutive online hours
+                t_off = (1-b)*(t_off + 1 - b) # Number of the last consecutive offline hours
         dict_results[g] = int(round(sign(t_on)*t_on - sign(t_off)*t_off)) # This is an integer?
     return dict_results
 
-def return_powergenerated_t_end(instance):
-    t_end = instance.TimePeriods.last()
+def return_powergenerated_t(instance, t=None):
+    # Find power generation levels at period t
+    if not t:
+        t = instance.TimePeriods.last()
+    elif t not in instance.TimePeriods:
+        print "WARNING: NO POWER_GENERATED CREATED."
+        return None
     dict_results = dict()
     for g in instance.ThermalGenerators.iterkeys():
-        dict_results[g] = value(instance.PowerGenerated[g, t_end])
+        dict_results[g] = value(instance.PowerGenerated[g, t])
     return dict_results
 
 def examine_load():
@@ -729,17 +740,31 @@ if __name__ == "__main__":
 
     # extract_all_scenarios()
 
-    # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
-    # csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
-    # csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
-    # csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
-    # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
-    # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
-    # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
-    # csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
-    # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
-    # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/ha_load.csv'
-    # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/ha_generator.csv'
+    # TX 2000 bus system
+    csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
+    csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
+    csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
+    csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
+    csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
+    csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
+    csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
+    csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
+    csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
+    csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/ha_load.csv'
+    csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/ha_generator.csv'
+
+    # 118 bus system
+    # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
+    # csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
+    # csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
+    # csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
+    # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
+    # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
+    # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
+    # csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
+    # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
+    # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
+    # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_generator.csv'
 
     df_timesequence = pd.DataFrame(columns=['tH', 'tQ', 't5'], dtype='int')
     for i in range(1, 25):
@@ -749,18 +774,6 @@ if __name__ == "__main__":
                 df_timesequence.loc[index, 'tH'] = i
                 df_timesequence.loc[index, 'tQ'] = (i-1)*4 + j
                 df_timesequence.loc[index, 't5'] = index
-
-    csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
-    csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
-    csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
-    csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
-    csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
-    csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
-    csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
-    csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
-    csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
-    csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
-    csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_generator.csv'
 
     network = Network(csv_bus, csv_branch, csv_ptdf, csv_gen, csv_marginalcost, csv_blockmarginalcost, csv_blockoutputlimit)
     network.df_bus['VOLL'] = 9000
@@ -826,9 +839,12 @@ if __name__ == "__main__":
 
     # Start sequential run
     ls_instance = list()
-    for t in range(1, 25):
-        t_start = 4*(t-1) + 1
-        t_end   = 4*t
+    for t in range(1, 94):
+        t_start = t # 4*(t-1) + 1
+        t_end   = t + 3 # 4*t
+    # for t in range(1, 25):
+    #     t_start = 4*(t-1) + 1
+    #     t_end   = 4*t
 
         dict_uniton_da = MyDataFrame(
             df_uniton_da.loc[t_start: t_end, :].T
@@ -852,14 +868,17 @@ if __name__ == "__main__":
         results = optimizer.solve(i)
         i.solutions.load_from(results)
         print(
-            'Model {} solved at: {:>.2f} s, objective: {:>.2f}'.format(
+            'Model {} solved at: {:>.2f} s, objective: {:>.2f}, penalty: {:>.2f}'.format(
                 t, 
                 time() - t0,
-                value(i.TotalCostObjective)
+                value(i.TotalCostObjective),
+                value(i.SlackPenalty)
             )
         )
         ls_instance.append(i)
 
         # Extract initial parameters for the next RTUC run
-        dict_UnitOnT0State    = return_unitont0state(i)
-        dict_PowerGeneratedT0 = return_powergenerated_t_end(i)
+        dict_UnitOnT0State    = return_unitont0state(i, i.TimePeriods.first())
+        dict_PowerGeneratedT0 = return_powergenerated_t(i, i.TimePeriods.first())
+        # if t == 12:
+        #     IP()

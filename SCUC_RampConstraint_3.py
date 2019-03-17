@@ -509,7 +509,6 @@ def enforce_ramp_down_limits_rule(m, g, t):
         return (
             m.PowerGenerated[g, m.TimePeriods.prev(t)] 
             - m.PowerGenerated[g, t] 
-            - m.RegulatingReserveDnAvailable[g,t]
         ) <= (
             m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
             + m.ShutdownRampLimit[g] * (m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]) 
