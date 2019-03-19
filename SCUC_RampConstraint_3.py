@@ -411,17 +411,17 @@ def production_equals_demand_rule(m, t):
 # When fixed, merge back parts "a" and "b", leaving two constraints.
 
 def enforce_generator_output_limits_rule_part_a(m, g, t):
-   return m.MinimumPowerOutput[g]*m.UnitOn[g, t] <= m.PowerGenerated[g,t]
+    return m.MinimumPowerOutput[g]*m.UnitOn[g, t] <= m.PowerGenerated[g,t]
 
 def enforce_generator_output_limits_rule_part_b(m, g, t):
-   return m.PowerGenerated[g,t] <= m.MaximumPowerAvailable[g, t]
+    return m.PowerGenerated[g,t] <= m.MaximumPowerAvailable[g, t]
 
 def enforce_generator_output_limits_rule_part_c(m, g, t):
-   return m.MaximumPowerAvailable[g, t] <= m.MaximumPowerOutput[g]*m.UnitOn[g, t]
+    return m.MaximumPowerAvailable[g, t] <= m.MaximumPowerOutput[g]*m.UnitOn[g, t]
 
 # Maximum available power of non-thermal units less than forecast
 def enforce_renewable_generator_output_limits_rule(m, g, t):
-   return  m.MaximumPowerAvailable[g, t]<= m.PowerForecast[g,t]
+    return  m.MaximumPowerAvailable[g, t]<= m.PowerForecast[g,t]
 
 # Power generation of thermal units by block
 def enforce_generator_block_output_rule(m, g, t):
@@ -435,7 +435,7 @@ def enforce_generator_block_output_rule(m, g, t):
     )
 
 def enforce_generator_block_output_limit_rule(m, g, k, t):
-   return m.BlockPowerGenerated[g,k,t] <= m.BlockSize[g,k]
+    return m.BlockPowerGenerated[g,k,t] <= m.BlockSize[g,k]
 
 
 # impose upper bounds on the maximum power available for each generator in each time period, 
@@ -600,14 +600,14 @@ def enforce_up_time_constraints_subsequent(m, g, t):
 
 # constraint due to initial conditions.
 def enforce_down_time_constraints_initial(m, g):
-   if value(m.InitialTimePeriodsOffLine[g]) is 0: 
-      return Constraint.Skip
-   return sum(
-       m.UnitOn[g, t] 
+    if value(m.InitialTimePeriodsOffLine[g]) is 0: 
+        return Constraint.Skip
+    return sum(
+         m.UnitOn[g, t] 
     #    for g in m.ThermalGenerators 
-       for t in m.TimePeriods
-       if m.TimePeriods.value.index(t) < value(m.InitialTimePeriodsOffLine[g])
-   ) == 0.0
+        for t in m.TimePeriods
+        if m.TimePeriods.value.index(t) < value(m.InitialTimePeriodsOffLine[g])
+    ) == 0.0
 
 
 # constraint for each time period after that not involving the initial condition.
@@ -709,9 +709,9 @@ def enforce_regulating_up_reserve_requirement_rule(m, t):
      ) + m.RegulatingReserveUpShortage[t] - m.RegulatingReserveRequirement[t] == 0
  
 def enforce_regulating_down_reserve_requirement_rule(m, t):
-     return sum(
-         m.RegulatingReserveDnAvailable[g,t] for g in m.ThermalGenerators
-     ) + m.RegulatingReserveDnShortage[t] - m.RegulatingReserveRequirement[t] == 0
+    return sum(
+        m.RegulatingReserveDnAvailable[g,t] for g in m.ThermalGenerators
+    ) + m.RegulatingReserveDnShortage[t] - m.RegulatingReserveRequirement[t] == 0
 
 
 #############################################
@@ -731,40 +731,40 @@ def production_cost_function(m, g, t):
 
 # Compute the total production costs, across all generators and time periods.
 def compute_total_production_cost_rule(m):
-   return m.TotalProductionCost == sum(
-       m.ProductionCost[g, t] 
-       for g in m.ThermalGenerators 
-       for t in m.TimePeriods
-   )
+    return m.TotalProductionCost == sum(
+        m.ProductionCost[g, t]
+        for g in m.ThermalGenerators
+        for t in m.TimePeriods
+    )
 
 # Compute the per-generator, per-time period shut-down and start-up costs.
 def compute_shutdown_costs_rule(m, g, t):
-   if t is m.TimePeriods.first():
-      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (
-          m.UnitOnT0[g] - m.UnitOn[g, t]
-      )
-   else:
-      return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (
-          m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]
-      )
+    if t is m.TimePeriods.first():
+        return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (
+            m.UnitOnT0[g] - m.UnitOn[g, t]
+        )
+    else:
+        return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (
+            m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]
+        )
 
 def compute_startup_costs_rule(m, g, t):
-   if t is m.TimePeriods.first():
-      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (
-          -m.UnitOnT0[g] + m.UnitOn[g, t]
-      )
-   else:
-      return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (
-          -m.UnitOn[g, m.TimePeriods.prev(t)] + m.UnitOn[g, t]
-      )
+    if t is m.TimePeriods.first():
+        return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (
+            -m.UnitOnT0[g] + m.UnitOn[g, t]
+        )
+    else:
+        return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (
+            -m.UnitOn[g, m.TimePeriods.prev(t)] + m.UnitOn[g, t]
+        )
 
 # Compute the total startup and shutdown costs, across all generators and time periods.
 def compute_total_fixed_cost_rule(m):
-   return m.TotalFixedCost == sum(
-       m.StartupCost[g, t] + m.ShutdownCost[g, t]
-       for g in m.ThermalGenerators 
-       for t in m.TimePeriods
-   )
+    return m.TotalFixedCost == sum(
+        m.StartupCost[g, t] + m.ShutdownCost[g, t]
+        for g in m.ThermalGenerators 
+        for t in m.TimePeriods
+    )
 
 # Compute the total load curtailment cost
 def compute_total_curtailment_cost_rule(m):
@@ -785,12 +785,12 @@ def compute_total_reserve_shortage_cost_rule(m):
 
 # Objectives
 def total_cost_objective_rule(m):
-   return (
-       m.TotalProductionCost
-       + m.TotalFixedCost
-       + m.TotalCurtailmentCost
-       + m.TotalReserveShortageCost
-   ) 
+    return (
+        m.TotalProductionCost + 
+        m.TotalFixedCost + 
+        m.TotalCurtailmentCost + 
+        m.TotalReserveShortageCost
+    )
 
 def create_model(
     network,
