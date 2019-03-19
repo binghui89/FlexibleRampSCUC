@@ -9,6 +9,7 @@ from numpy import sign
 from matplotlib import pyplot as plt
 from IPython import embed as IP
 from SCUC_RampConstraint_3 import create_model, da_input, Network, MyDataFrame
+from economic_dispatch import *
 
 # model = create_model()
 
@@ -741,30 +742,32 @@ if __name__ == "__main__":
     # extract_all_scenarios()
 
     # TX 2000 bus system
-    csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
-    csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
-    csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
-    csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
-    csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
-    csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
-    csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
-    csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
-    csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
-    csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/ha_load.csv'
-    csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/ha_generator.csv'
+    # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
+    # csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
+    # csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
+    # csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
+    # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
+    # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
+    # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
+    # csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
+    # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
+    # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/ha_load.csv'
+    # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/ha_generator.csv'
 
     # 118 bus system
-    # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
-    # csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
-    # csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
-    # csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
-    # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
-    # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
-    # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
-    # csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
-    # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
-    # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
-    # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_generator.csv'
+    csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
+    csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
+    csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
+    csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
+    csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
+    csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
+    csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
+    csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
+    csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
+    csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
+    csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_generator.csv'
+    csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ed_loads.csv'
+    csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ed_generator.csv'
 
     df_timesequence = pd.DataFrame(columns=['tH', 'tQ', 't5'], dtype='int')
     for i in range(1, 25):
@@ -774,6 +777,7 @@ if __name__ == "__main__":
                 df_timesequence.loc[index, 'tH'] = i
                 df_timesequence.loc[index, 'tQ'] = (i-1)*4 + j
                 df_timesequence.loc[index, 't5'] = index
+    df_timesequence = df_timesequence.astype('int')
 
     network = Network(csv_bus, csv_branch, csv_ptdf, csv_gen, csv_marginalcost, csv_blockmarginalcost, csv_blockoutputlimit)
     network.df_bus['VOLL'] = 9000
@@ -812,15 +816,23 @@ if __name__ == "__main__":
 
     # Start RTUC
     nI_ha = 4 # Number of intervals in a hour in the RTUC run
+    nI_ed = 12 # Number of intervals in a hour in the RTED run
 
     # Prepare hourly ahead data
     df_busload_ha = pd.read_csv(csv_busload_ha, index_col=['Slot'])
     df_genfor_ha  = pd.read_csv(csv_genfor_ha, index_col=['Slot'])
     df_busload_ha = MyDataFrame(df_busload_ha.loc[:, df_busload_ha.columns.difference(['LOAD'])])
     df_genfor_ha  = MyDataFrame(df_genfor_ha)
-    # df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
-    df_genfor_ha = df_genfor_ha.loc[:, network.df_gen[network.df_gen['GEN_TYPE']!='Thermal'].index]
+    df_genfor_ha  = df_genfor_ha.loc[:, network.df_gen[network.df_gen['GEN_TYPE']!='Thermal'].index]
     df_genfor_ha.fillna(0, inplace=True)
+
+    # Prepare economic dispatch data
+    df_busload_ed = pd.read_csv(csv_busload_ed, index_col=['Slot'])
+    df_genfor_ed  = pd.read_csv(csv_genfor_ed, index_col=['Slot'])
+    df_busload_ed = MyDataFrame(df_busload_ed.loc[:, df_busload_ed.columns.difference(['LOAD'])])
+    df_genfor_ed  = MyDataFrame(df_genfor_ed)
+    df_genfor_ed  = df_genfor_ed.loc[:, network.df_gen[network.df_gen['GEN_TYPE']!='Thermal'].index]
+    df_genfor_ed.fillna(0, inplace=True)
 
     # Obtain commitment statuses of slow-starting units from DAUC model
     df_uniton_da = MyDataFrame(index=df_genfor_ha.index)
@@ -831,20 +843,21 @@ if __name__ == "__main__":
                 df_uniton_da.loc[i, g] = v
 
     # RTUC initiation parameters
-    dict_UnitOnT0State     = None
-    dict_PowerGeneratedT0  = None
+    dict_UnitOnT0State       = None
+    dict_PowerGeneratedT0    = None
+    dict_PowerGeneratedT0_ed = None
 
     # network.df_gen.loc[network.df_gen['MINIMUM_DOWN_TIME']==1, 'MINIMUM_DOWN_TIME'] = 0.25
     # network.df_gen.loc[network.df_gen['MINIMUM_UP_TIME']==1, 'MINIMUM_UP_TIME'] = 0.25
 
     # Start sequential run
     ls_instance = list()
-    for t in range(1, 94):
-        t_start = t # 4*(t-1) + 1
-        t_end   = t + 3 # 4*t
-    # for t in range(1, 25):
-    #     t_start = 4*(t-1) + 1
-    #     t_end   = 4*t
+    for i_rtuc in range(1, 94):
+        t_start = i_rtuc # 4*(i_rtuc-1) + 1
+        t_end   = i_rtuc + 3 # 4*i_rtuc
+    # for i_rtuc in range(1, 25):
+    #     t_start = 4*(i_rtuc-1) + 1
+    #     t_end   = 4*i_rtuc
 
         dict_uniton_da = MyDataFrame(
             df_uniton_da.loc[t_start: t_end, :].T
@@ -862,23 +875,72 @@ if __name__ == "__main__":
             dict_PowerGeneratedT0,
             dict_uniton_da,
         )
-        print "Model {} created!".format(t)
+        print "RTUC Model {} created!".format(i_rtuc)
 
         # Solve RTUC model
         results = optimizer.solve(i)
         i.solutions.load_from(results)
         print(
-            'Model {} solved at: {:>.2f} s, objective: {:>.2f}, penalty: {:>.2f}'.format(
-                t, 
+            'RTUC Model {} solved at: {:>.2f} s, objective: {:>.2f}, penalty: {:s}'.format(
+                i_rtuc, 
                 time() - t0,
                 value(i.TotalCostObjective),
-                value(i.SlackPenalty)
+                'N/A' # value(i.SlackPenalty)
             )
         )
         ls_instance.append(i)
 
+        # List of time intervals in the ED run
+        ls_t_ed = df_timesequence.loc[df_timesequence['tQ']==t_start, 't5'].tolist()
+        for t_start_ed in ls_t_ed:
+            # Obtain upper and lower dispatch limits from the RTUC model
+            dict_UpperDispatchLimit, dict_LowerDispatchLimit = dispatch_limits(i, [t_start_ed], df_timesequence.astype('int'))
+
+            # Obtain commitment statuses of slow-starting units from DAUC model
+            dict_uniton_ha = dict()
+            for t5 in [t_start_ed]:
+                tQ = df_timesequence.loc[df_timesequence['t5'] == t5, 'tQ'].tolist()[0]
+                for g in i.ThermalGenerators.iterkeys():
+                    dict_uniton_ha[g, t5] = value(i.UnitOn[g, tQ])
+
+            # Create ED model
+            instance_ed = build_sced_model(
+                network,
+                df_busload_ed.loc[df_busload_ed.index==t_start_ed, :], # Only bus load, first dimension time starts from 1, no total load. For ED model, there should be only 1 row
+                df_genfor_ed.loc[df_busload_ed.index==t_start_ed, :], # Only generation from nonthermal gens, first dim time starts from 1
+                ReserveFactor,
+                RegulatingReserveFactor,
+                nI_ed, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
+                None, # Not required for ED
+                dict_PowerGeneratedT0_ed, # How many time periods the units have been on at T0 from last RTUC model
+                dict_uniton_ha, # Initial power generation level at T0 from last RTUC model
+                #########
+                # The following parameters only apply for the ED model
+                dict_UpperDispatchLimit,
+                dict_LowerDispatchLimit,
+            )
+
+            # Solve the model
+            results_ed = optimizer.solve(instance_ed)
+            instance_ed.solutions.load_from(results)
+            print (
+                '    RTED Model {} solved at: {:>.2f} s, objective: {:>.2f}, penalty: {:s}'.format(
+                    t_start_ed, 
+                    time() - t0,
+                    value(instance_ed.TotalCostObjective),
+                    'N/A' # value(i.SlackPenalty)
+                )
+            )
+
+            # Extract initial parameters for the next run
+            dict_PowerGeneratedT0_ed = return_powergenerated_t(
+                instance_ed, instance_ed.TimePeriods.last()
+            )
+
         # Extract initial parameters for the next RTUC run
         dict_UnitOnT0State    = return_unitont0state(i, i.TimePeriods.first())
-        dict_PowerGeneratedT0 = return_powergenerated_t(i, i.TimePeriods.first())
+        # dict_PowerGeneratedT0 = return_powergenerated_t(i, i.TimePeriods.first())
+        dict_PowerGeneratedT0 = dict_PowerGeneratedT0_ed
+        # IP()
         # if t == 12:
         #     IP()
