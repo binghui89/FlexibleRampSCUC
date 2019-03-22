@@ -340,12 +340,12 @@ def da_input():
 # Minimum and maximum generation levels, for each thermal generator in MW.
 # could easily be specified on a per-time period basis, but are not currently.
 def maximum_power_output_validator(m, v, g):
-   return v >= value(m.MinimumPowerOutput[g])
+    return v >= value(m.MinimumPowerOutput[g])
 
 # Limits for time periods in which generators are brought on or off-line. 
 # Must not be less than the generator minimum output. 
 def at_least_generator_minimum_output_validator(m, v, g):
-   return v >= m.MinimumPowerOutput[g]
+    return v >= m.MinimumPowerOutput[g]
 
 # Unit on state at t=0 (initial condition), the value cannot be 0, by definition.
 # if positive, the number of hours prior to (and including) t=0 that the unit has been on.
@@ -359,13 +359,13 @@ def t0_unit_on_rule(m, g):
 # The number of time periods that a generator must initally on-line (off-line) 
 # due to its minimum up time (down time) constraint.
 def initial_time_periods_online_rule(m, g):
-   if not value(m.UnitOnT0[g]):
-      return 0
-   else:
-      return min(
-          value(m.NumTimePeriods),
-          max(0, value(m.MinimumUpTime[g]) - value(m.UnitOnT0State[g]))
-      )
+    if not value(m.UnitOnT0[g]):
+        return 0
+    else:
+        return min(
+            value(m.NumTimePeriods),
+            max(0, value(m.MinimumUpTime[g]) - value(m.UnitOnT0State[g]))
+        )
 
 def initial_time_periods_offline_rule(m, g):
    if value(m.UnitOnT0[g]):
@@ -390,10 +390,10 @@ def _regulating_requirement_rule(m, t):
 # meet the demand at each time period.
 # encodes Constraint 2 in Carrion and Arroyo.
 def definition_hourly_curtailment_rule(m, t):
-   return m.Curtailment[t] == sum(m.BusCurtailment[b, t] for b in m.LoadBuses)
+    return m.Curtailment[t] == sum(m.BusCurtailment[b, t] for b in m.LoadBuses)
 
 def production_equals_demand_rule(m, t):
-   return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) + m.Curtailment[t] == m.Demand[t]
+    return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) + m.Curtailment[t] == m.Demand[t]
 
 #############################################
 # generation limit and ramping constraints
@@ -479,7 +479,7 @@ def enforce_max_available_ramp_down_rates_rule(m, g, t):
     # (1, 0) - unit switching off: RHS = shutdown ramp limit
     # (1, 1) - unit staying on:    RHS = maximum generator output (degenerate 
     #                                    upper bound)
-    if t == m.TimePeriods.last(): # Maybe we can use m.TimePeriod.last() here
+    if t == m.TimePeriods.last():
         return Constraint.Skip
     else:
         return m.MaximumPowerAvailable[g, t] <= (
@@ -806,8 +806,13 @@ def create_model(
     model = ConcreteModel()
     model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
 
-    """SETS"""
+    """SETS & PARAMETERS"""
     ##########################################################
+    # The number of time periods under consideration, in addition to the corresponding set.
+    # model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(load_df.index))
+    model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(df_busload.index))
+    model.TimePeriods    = Set(initialize=df_busload.index, ordered=True)
+
     # String indentifiers for the sets of different types of generators.
     i_thermal = (network.df_gen['GEN_TYPE']=='Thermal')
     model.AllGenerators        = Set(initialize=network.df_gen.index)
@@ -830,11 +835,47 @@ def create_model(
 
     # Set of Generator Blocks Set.
     model.Blocks = Set(initialize = network.df_blockmargcost.columns)
+    # Production cost coefficients (for the quadratic) 
+    # a0=constant, a1=linear coefficient, a2=quadratic coefficient.
+
+    # model.ProductionCostA0 = Param(
+    #     model.ThermalGenerators,
+    #     within=NonNegativeReals, initialize=gen_df['COST_0'].to_dict()
+    # ) # units are $/hr (or whatever the time unit is).
+    # model.ProductionCostA1 = Param(
+    #     model.ThermalGenerators, 
+    #     within=NonNegativeReals, initialize=margcost_df['1'].to_dict()
+    # ) # units are $/MWhr.
+    # model.ProductionCostA2 = Param(
+    #     model.ThermalGenerators, 
+    #     within=NonNegativeReals, initialize=gen_df['COST_2'].to_dict()
+    # ) # units are $/(MWhr^2).
+    # Number of cost function blockes indexed by (gen, block)
+    model.BlockSize = Param(
+        model.ThermalGenerators, model.Blocks,
+        initialize=network.return_dict_blockoutputlimit()
+    )
+    model.BlockMarginalCost = Param(
+        model.ThermalGenerators, model.Blocks, 
+        within=NonNegativeReals,
+        initialize=network.return_dict_blockmargcost()
+    )
+    model.BlockSize0 = Param(
+        model.ThermalGenerators,
+        initialize=network.df_margcost['Pmax0'].to_dict()
+    )
+    model.BlockMarginalCost0 = Param(
+        model.ThermalGenerators,
+        initialize=network.df_margcost['nlcost'].to_dict()
+    )
 
     # String indentifiers for the set of load buses.
     # model.LoadBuses = Set(initialize=load_s_df.columns)
     model.LoadBuses = Set(initialize=df_busload.columns)
     model.Buses     = Set(initialize=network.df_bus.index)
+    # Buses indexed by all generators.
+    model.GenBuses = Param(model.AllGenerators, initialize=network.df_gen['GEN_BUS'].to_dict())
+
 
     # String indentifiers for the set of branches.
     model.Branches         = Set(initialize=network.df_branch.index)
@@ -849,17 +890,7 @@ def create_model(
         default=0.0
     )
 
-    # The number of time periods under consideration, in addition to the corresponding set.
-    # model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(load_df.index))
-    model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(df_busload.index))
-    # model.TimePeriods    = RangeSet(1, model.NumTimePeriods)
-    model.TimePeriods    = Set(initialize=df_busload.index, ordered=True)
-
-    """PARAMETERS"""
     ##########################################################
-    # Buses indexed by all generators.
-    model.GenBuses = Param(model.AllGenerators, initialize=network.df_gen['GEN_BUS'].to_dict())
-
     # Line capacity limits indexed by branches, units are MW.
     model.LineLimits = Param(
         model.Branches,
@@ -923,17 +954,17 @@ def create_model(
         validate=maximum_power_output_validator
     )
 
-    # Generator ramp up/down rates. units are MW/h.
+    # Generator ramp up/down rates. units are MW/interval.
     # Limits for normal time periods
     model.NominalRampUpLimit   = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=(network.df_gen.loc[i_thermal, 'RAMP_10']).to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'RAMP_10']/nI).to_dict(),
     )
     model.NominalRampDownLimit = Param(
         model.ThermalGenerators,
         within=NonNegativeReals, 
-        initialize=(network.df_gen.loc[i_thermal, 'RAMP_10']).to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'RAMP_10']/nI).to_dict(),
     )
 
     # Limits for start-up/shut-down
@@ -964,23 +995,34 @@ def create_model(
         mutable=True
     )
 
-    if dict_UnitOnT0State:
-        # Use unit commitment statuses from previous RTUC solutions
-        model.UnitOnT0State = Param(
-            model.ThermalGenerators,
-            within=Integers,
-            initialize=dict_UnitOnT0State,
-            validate=t0_state_nonzero_validator,
-            mutable=True
-        )
-    else:
-        model.UnitOnT0State = Param(
-            model.ThermalGenerators,
-            within=Integers,
-            initialize=(network.df_gen.loc[i_thermal, 'GEN_STATUS']*nI).to_dict(),
-            validate=t0_state_nonzero_validator,
-            mutable=True
-        )
+    # if dict_UnitOnT0State:
+    #     # Use unit commitment statuses from previous RTUC solutions
+    #     model.UnitOnT0State = Param(
+    #         model.ThermalGenerators,
+    #         within=Integers,
+    #         initialize=dict_UnitOnT0State,
+    #         validate=t0_state_nonzero_validator,
+    #         mutable=True
+    #     )
+    # else:
+    #     model.UnitOnT0State = Param(
+    #         model.ThermalGenerators,
+    #         within=Integers,
+    #         initialize=(network.df_gen.loc[i_thermal, 'GEN_STATUS']*nI).to_dict(),
+    #         validate=t0_state_nonzero_validator,
+    #         mutable=True
+    #     )
+    model.UnitOnT0State = Param(
+        model.ThermalGenerators,
+        within=Integers,
+        initialize=(
+            dict_UnitOnT0State
+            if dict_UnitOnT0State
+            else (network.df_gen.loc[i_thermal, 'GEN_STATUS']*nI).to_dict()
+        ),
+        validate=t0_state_nonzero_validator,
+        mutable=True
+    )
 
     model.UnitOnT0 = Param(
         model.ThermalGenerators,
@@ -1003,55 +1045,15 @@ def create_model(
     )
 
     # Generator power output at t=0 (initial condition). units are MW.
-    if dict_PowerGeneratedT0:
-        # Use power generation levels from previous RTUC solutions
-        model.PowerGeneratedT0 = Param(
-            model.AllGenerators, 
-            within=NonNegativeReals,
-            initialize=dict_PowerGeneratedT0,
-            mutable=True
-        )
-    else:
-        model.PowerGeneratedT0 = Param(
-            model.AllGenerators, 
-            within=NonNegativeReals,
-            initialize=network.df_gen.loc[i_thermal, 'PMIN'].to_dict(),
-            mutable=True
-        )
-
-    # Production cost coefficients (for the quadratic) 
-    # a0=constant, a1=linear coefficient, a2=quadratic coefficient.
-
-    # model.ProductionCostA0 = Param(
-    #     model.ThermalGenerators,
-    #     within=NonNegativeReals, initialize=gen_df['COST_0'].to_dict()
-    # ) # units are $/hr (or whatever the time unit is).
-    # model.ProductionCostA1 = Param(
-    #     model.ThermalGenerators, 
-    #     within=NonNegativeReals, initialize=margcost_df['1'].to_dict()
-    # ) # units are $/MWhr.
-    # model.ProductionCostA2 = Param(
-    #     model.ThermalGenerators, 
-    #     within=NonNegativeReals, initialize=gen_df['COST_2'].to_dict()
-    # ) # units are $/(MWhr^2).
-    model.BlockMarginalCost = Param(
-        model.ThermalGenerators, model.Blocks, 
+    model.PowerGeneratedT0 = Param(
+        model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=network.return_dict_blockmargcost()
-    )
-    # Number of cost function blockes indexed by (gen, block)
-    model.BlockSize = Param(
-        model.ThermalGenerators, model.Blocks,
-        initialize=network.return_dict_blockoutputlimit()
-    )
-
-    model.BlockSize0 = Param(
-        model.ThermalGenerators,
-        initialize=network.df_margcost['Pmax0'].to_dict()
-    )
-    model.BlockMarginalCost0 = Param(
-        model.ThermalGenerators,
-        initialize=network.df_margcost['nlcost'].to_dict()
+        initialize=(
+            dict_PowerGeneratedT0 
+            if dict_PowerGeneratedT0 
+            else network.df_gen.loc[i_thermal, 'PMIN'].to_dict()
+        ),
+        mutable=True
     )
 
     # Shutdown and startup cost for each generator, in the literature, these are 
@@ -1091,90 +1093,119 @@ def create_model(
     ##########################################################
     # Reserve variables
     model.RegulatingReserveUpAvailable = Var(
-        model.ThermalGenerators, model.TimePeriods,
-        within=NonNegativeReals, initialize=0.0
+        model.ThermalGenerators, 
+        model.TimePeriods,
+        within=NonNegativeReals, 
+        initialize=0.0
     )
     model.RegulatingReserveDnAvailable = Var(
-        model.ThermalGenerators, model.TimePeriods,
-        within=NonNegativeReals, initialize=0.0
+        model.ThermalGenerators, 
+        model.TimePeriods,
+        within=NonNegativeReals, 
+        initialize=0.0
     )
     model.SpinningReserveUpAvailable = Var(
-        model.ThermalGenerators, model.TimePeriods, 
-        within=NonNegativeReals, initialize=0.0
+        model.ThermalGenerators, 
+        model.TimePeriods, 
+        within=NonNegativeReals, 
+        initialize=0.0
     )
 
     # Reserve shortages
     model.RegulatingReserveUpShortage = Var(
         model.TimePeriods,
-        within=NonNegativeReals, initialize=0.0
+        within=NonNegativeReals, 
+        initialize=0.0
     )
     model.RegulatingReserveDnShortage = Var(
         model.TimePeriods,
-        within=NonNegativeReals, initialize=0.0
+        within=NonNegativeReals, 
+        initialize=0.0
     )
     model.SpinningReserveUpShortage = Var(
         model.TimePeriods, 
-        within=NonNegativeReals, initialize=0.0
+        within=NonNegativeReals, 
+        initialize=0.0
     )
 
     # Generator related variables
     # Indicator variables for each generator, at each time period.
     model.UnitOn = Var(
-        model.ThermalGenerators, model.TimePeriods,
-        within=Binary, initialize=0
+        model.ThermalGenerators, 
+        model.TimePeriods,
+        within=Binary, 
+        initialize=0
     )
     if dict_uniton_da:
         for k in dict_uniton_da.iterkeys():
             model.UnitOn[k].fix(dict_uniton_da[k])
     # Amount of power produced by each generator, at each time period.
     model.PowerGenerated = Var(
-        model.AllGenerators, model.TimePeriods,
-        within=NonNegativeReals, initialize=0.0
+        model.AllGenerators, 
+        model.TimePeriods,
+        within=NonNegativeReals, 
+        initialize=0.0
     )
     # Amount of power produced by each generator, in each block, at each time period.
     model.BlockPowerGenerated = Var(
-        model.ThermalGenerators, model.Blocks, model.TimePeriods,
-        within=NonNegativeReals, initialize=0.0
+        model.ThermalGenerators,
+        model.Blocks,
+        model.TimePeriods,
+        within=NonNegativeReals,
+        initialize=0.0
     )
 
     # Maximum power output for each generator, at each time period.
     model.MaximumPowerAvailable = Var(
-        model.AllGenerators, model.TimePeriods, 
-        within=NonNegativeReals, initialize=0.0
+        model.AllGenerators,
+        model.TimePeriods,
+        within=NonNegativeReals,
+        initialize=0.0
     )
 
     # Costs
     # Production cost associated with each generator, for each time period.
     model.ProductionCost = Var(
-        model.ThermalGenerators, model.TimePeriods, 
-        within=NonNegativeReals, initialize=0.0
+        model.ThermalGenerators,
+        model.TimePeriods, 
+        within=NonNegativeReals,
+        initialize=0.0
     )
     # Cost over all generators, for all time periods.
     model.TotalProductionCost = Var(within=NonNegativeReals, initialize=0.0)
 
     # Startup and shutdown costs for each generator, each time period.
     model.StartupCost = Var(
-        model.ThermalGenerators, model.TimePeriods, 
-        within=NonNegativeReals, initialize=0.0
+        model.ThermalGenerators,
+        model.TimePeriods, 
+        within=NonNegativeReals, 
+        initialize=0.0
     )
     model.ShutdownCost = Var(
-        model.ThermalGenerators, model.TimePeriods, 
-        within=NonNegativeReals, initialize=0.0
+        model.ThermalGenerators,
+        model.TimePeriods, 
+        within=NonNegativeReals, 
+        initialize=0.0
     )
     model.TotalFixedCost = Var(within=NonNegativeReals, initialize=0.0)
 
+    # Load curtailment penalty cost
     model.BusCurtailment = Var(
-        model.LoadBuses,model.TimePeriods, 
-        within=NonNegativeReals, initialize=0.0
+        model.LoadBuses,
+        model.TimePeriods, 
+        within=NonNegativeReals, 
+        initialize=0.0
     )
     model.Curtailment = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
     model.TotalCurtailmentCost = Var(initialize=0.0, within=NonNegativeReals)
+
+    # Reserve shortage penalty cost
     model.TotalReserveShortageCost = Var(initialize=0.0, within=NonNegativeReals)
 
     """CONSTRAINTS"""
-    ##########################################################
-    # CONSTRAINTS
-    ##########################################################
+    ############################################
+    # supply-demand constraints                #
+    ############################################
     model.DefineHourlyCurtailment = Constraint(
         model.TimePeriods, rule=definition_hourly_curtailment_rule
     )
@@ -1182,6 +1213,9 @@ def create_model(
         model.TimePeriods, rule=production_equals_demand_rule
     )
 
+    ############################################
+    # generation limit constraints #
+    ############################################
     model.EnforceGeneratorOutputLimitsPartA = Constraint(
         model.ThermalGenerators, model.TimePeriods,
         rule=enforce_generator_output_limits_rule_part_a
@@ -1200,6 +1234,9 @@ def create_model(
         rule=enforce_renewable_generator_output_limits_rule
     )
 
+    ############################################
+    # generation block outputs constraints #
+    ############################################
     model.EnforceGeneratorBlockOutput = Constraint(
         model.ThermalGenerators, model.TimePeriods, 
         rule=enforce_generator_block_output_rule
@@ -1209,6 +1246,9 @@ def create_model(
         rule=enforce_generator_block_output_limit_rule
     )
 
+    ############################################
+    # generation ramping constraints #
+    ############################################
     model.EnforceMaxAvailableRampUpRates = Constraint(
         model.ThermalGenerators, model.TimePeriods, 
         rule=enforce_max_available_ramp_up_rates_rule
@@ -1224,6 +1264,9 @@ def create_model(
         rule=enforce_ramp_down_limits_rule
     )
 
+    #############################################
+    # constraints for line capacity limits #
+    #############################################
     model.LineFlow = Expression(
         model.EnforcedBranches, model.TimePeriods,
         rule=line_flow_rule
@@ -1237,6 +1280,9 @@ def create_model(
         rule=enforce_line_capacity_limits_rule_b
     )
 
+    #############################################
+    # Minimum online/offline time constriants #
+    #############################################
     model.EnforceUpTimeConstraintsInitial = Constraint(
         model.ThermalGenerators, 
         rule=enforce_up_time_constraints_initial
@@ -1257,6 +1303,10 @@ def create_model(
         rule=enforce_down_time_constraints_subsequent
     )
 
+    #############################################
+    # Available reseves from thermal generators #
+    #############################################
+
     model.reserve_up_by_maximum_available_power_thermal_constraint = Constraint(
         model.ThermalGenerators, model.TimePeriods,
         rule=reserve_up_by_maximum_available_power_thermal_rule
@@ -1275,6 +1325,9 @@ def create_model(
     #     rule=reserve_dn_by_ramp_thermal_rule
     # )
 
+    #############################################
+    # Reserve requirements constraints #
+    #############################################
     model.EnforceSpinningReserveUp = Constraint(
         model.TimePeriods, rule=enforce_spinning_reserve_requirement_rule
     )
@@ -1285,6 +1338,10 @@ def create_model(
     model.EnforceRegulatingDnReserveRequirements = Constraint(
         model.TimePeriods, rule=enforce_regulating_down_reserve_requirement_rule
     )
+
+    #############################################
+    # constraints for computing cost components #
+    #############################################
 
     model.ComputeProductionCost = Constraint(
         model.ThermalGenerators, model.TimePeriods, 

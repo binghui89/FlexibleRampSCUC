@@ -650,6 +650,7 @@ def return_unitont0state(instance, t=None):
         for tau in instance.TimePeriods.iterkeys():
             if instance.TimePeriods.value.index(tau) <= instance.TimePeriods.value.index(t):
                 b = value(instance.UnitOn[g, tau])
+                b = int(round(b))
                 t_on  = b*(t_on + b) # Number of the last consecutive online hours
                 t_off = (1-b)*(t_off + 1 - b) # Number of the last consecutive offline hours
         dict_results[g] = int(round(sign(t_on)*t_on - sign(t_off)*t_off)) # This is an integer?
@@ -753,6 +754,8 @@ if __name__ == "__main__":
     # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
     # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/ha_load.csv'
     # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/ha_generator.csv'
+    # csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/ed_load.csv'
+    # csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/ed_generator.csv'
 
     # 118 bus system
     csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
@@ -844,6 +847,7 @@ if __name__ == "__main__":
 
     # RTUC initiation parameters
     dict_UnitOnT0State       = None
+    dict_UnitOnT0State_ed    = None
     dict_PowerGeneratedT0    = None
     dict_PowerGeneratedT0_ed = None
 
@@ -891,33 +895,36 @@ if __name__ == "__main__":
         ls_instance.append(i)
 
         # List of time intervals in the ED run
+        dict_uniton_ha = dict_UnitOnT0State
         ls_t_ed = df_timesequence.loc[df_timesequence['tQ']==t_start, 't5'].tolist()
         for t_start_ed in ls_t_ed:
+            t_end_ed = t_start_ed + 5 # Total 6 ED intervals, 1 binding interval, 5 look-ahead interval, 30 min in total
             # Obtain upper and lower dispatch limits from the RTUC model
-            dict_UpperDispatchLimit, dict_LowerDispatchLimit = dispatch_limits(i, [t_start_ed], df_timesequence.astype('int'))
+            # dict_UpperDispatchLimit, dict_LowerDispatchLimit = dispatch_limits(i, [t_start_ed], df_timesequence.astype('int'))
 
             # Obtain commitment statuses of slow-starting units from DAUC model
             dict_uniton_ha = dict()
-            for t5 in [t_start_ed]:
+            for t5 in range(t_start_ed, t_end_ed+1):
                 tQ = df_timesequence.loc[df_timesequence['t5'] == t5, 'tQ'].tolist()[0]
                 for g in i.ThermalGenerators.iterkeys():
-                    dict_uniton_ha[g, t5] = value(i.UnitOn[g, tQ])
+                    v = value(i.UnitOn[g, tQ])
+                    dict_uniton_ha[g, t5] = int(round(v))
 
             # Create ED model
             instance_ed = build_sced_model(
                 network,
-                df_busload_ed.loc[df_busload_ed.index==t_start_ed, :], # Only bus load, first dimension time starts from 1, no total load. For ED model, there should be only 1 row
-                df_genfor_ed.loc[df_busload_ed.index==t_start_ed, :], # Only generation from nonthermal gens, first dim time starts from 1
+                df_busload_ed.loc[t_start_ed: t_end_ed, :], # Only bus load, first dimension time starts from 1, no total load. For ED model, there should be only 1 row
+                df_genfor_ed.loc[t_start_ed: t_end_ed, :], # Only generation from nonthermal gens, first dim time starts from 1
                 ReserveFactor,
                 RegulatingReserveFactor,
                 nI_ed, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
-                None, # Not required for ED
+                dict_UnitOnT0State_ed, #
                 dict_PowerGeneratedT0_ed, # How many time periods the units have been on at T0 from last RTUC model
-                dict_uniton_ha, # Initial power generation level at T0 from last RTUC model
+                dict_uniton_ha, # Commitment statuses of ALL units from RTUC model
                 #########
                 # The following parameters only apply for the ED model
-                dict_UpperDispatchLimit,
-                dict_LowerDispatchLimit,
+                # dict_UpperDispatchLimit,
+                # dict_LowerDispatchLimit,
             )
 
             # Solve the model
@@ -932,15 +939,16 @@ if __name__ == "__main__":
                 )
             )
 
-            # Extract initial parameters for the next run
+            # Extract initial parameters from the binding interval for the next run
+            dict_UnitOnT0State_ed    = return_unitont0state(instance_ed, instance_ed.TimePeriods.first())
             dict_PowerGeneratedT0_ed = return_powergenerated_t(
-                instance_ed, instance_ed.TimePeriods.last()
+                instance_ed, instance_ed.TimePeriods.first()
             )
 
-        # Extract initial parameters for the next RTUC run
+        # Extract initial parameters from the binding interval of the last ED run for the next RTUC run
         dict_UnitOnT0State    = return_unitont0state(i, i.TimePeriods.first())
-        # dict_PowerGeneratedT0 = return_powergenerated_t(i, i.TimePeriods.first())
-        dict_PowerGeneratedT0 = dict_PowerGeneratedT0_ed
+        dict_PowerGeneratedT0 = return_powergenerated_t(i, i.TimePeriods.first())
+        # dict_PowerGeneratedT0 = dict_PowerGeneratedT0_ed
         # IP()
         # if t == 12:
         #     IP()
