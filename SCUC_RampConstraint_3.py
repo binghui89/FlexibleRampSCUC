@@ -393,7 +393,7 @@ def definition_hourly_curtailment_rule(m, t):
     return m.Curtailment[t] == sum(m.BusCurtailment[b, t] for b in m.LoadBuses)
 
 def production_equals_demand_rule(m, t):
-    return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) + m.Curtailment[t] == m.Demand[t]
+   return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) + m.Curtailment[t] - m.OverCommit[t] == m.Demand[t]
 
 #############################################
 # generation limit and ramping constraints
@@ -454,14 +454,14 @@ def enforce_max_available_ramp_up_rates_rule(m, g, t):
     #                                    degenerate upper bound due to unit off)
     # (1, 1) - unit staying on:    RHS = standard ramp limit
     if t == m.TimePeriods.first():
-        return m.MaximumPowerAvailable[g, t] <= (
+        return m.MaximumPowerAvailable[g, t] - m.SlackRamp1_neg[g, t] <= (
             m.PowerGeneratedT0[g] 
             + m.NominalRampUpLimit[g] * m.UnitOnT0[g] 
             + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOnT0[g]) 
             + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
         )
     else:
-        return m.MaximumPowerAvailable[g, t] <= (
+        return m.MaximumPowerAvailable[g, t] - m.SlackRamp1_neg[g, t] <= (
             m.PowerGenerated[g, m.TimePeriods.prev(t)] 
             + m.NominalRampUpLimit[g] * m.UnitOn[g, m.TimePeriods.prev(t)] 
             + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.prev(t)]) 
@@ -482,7 +482,7 @@ def enforce_max_available_ramp_down_rates_rule(m, g, t):
     if t == m.TimePeriods.last():
         return Constraint.Skip
     else:
-        return m.MaximumPowerAvailable[g, t] <= (
+        return m.MaximumPowerAvailable[g, t] - m.SlackRamp2_neg[g, t] <= (
             m.MaximumPowerOutput[g] * m.UnitOn[g, m.TimePeriods.next(t)] 
             + m.ShutdownRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.next(t)])
         )
@@ -500,7 +500,7 @@ def enforce_ramp_down_limits_rule(m, g, t):
     # (1, 0) - unit switching off: RHS = shutdown ramp limit 
     # (1, 1) - unit staying on:    RHS = standard ramp-down limit 
     if t == m.TimePeriods.first():
-        return m.PowerGeneratedT0[g] - m.PowerGenerated[g, t] <= (
+        return m.PowerGeneratedT0[g] - m.PowerGenerated[g, t] - m.SlackRamp3_neg[g, t] <= (
             m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
             + m.ShutdownRampLimit[g] * (m.UnitOnT0[g] - m.UnitOn[g, t]) 
             + m.MaximumPowerOutput[g] * (1 - m.UnitOnT0[g])
@@ -509,7 +509,7 @@ def enforce_ramp_down_limits_rule(m, g, t):
         return (
             m.PowerGenerated[g, m.TimePeriods.prev(t)] 
             - m.PowerGenerated[g, t] 
-        ) <= (
+        ) - m.SlackRamp3_neg[g, t] <= (
             m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
             + m.ShutdownRampLimit[g] * (m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]) 
             + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, m.TimePeriods.prev(t)])
@@ -552,7 +552,7 @@ def enforce_up_time_constraints_initial(m, g):
         # for g in m.ThermalGenerators 
         for t in m.TimePeriods
         if m.TimePeriods.value.index(t) < value(m.InitialTimePeriodsOnLine[g])
-    ) == 0.0
+    ) + m.SlackUpInitial_plus[g] - m.SlackUpInitial_neg[g] == 0.0
 
 # Constraint for each time period after that not involving the initial condition.
 def enforce_up_time_constraints_subsequent(m, g, t):
@@ -572,13 +572,13 @@ def enforce_up_time_constraints_subsequent(m, g, t):
                 m.UnitOn[g, n] 
                 for n in m.TimePeriods 
                 if n >= t and n <= t + value(m.MinimumUpTime[g]) - 1
-            ) >= m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOnT0[g])
+            ) + m.SlackUpSubsequent_plus[g, t] - m.SlackUpSubsequent_neg[g, t] >= m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOnT0[g])
         else:
             return sum(
                 m.UnitOn[g, n] 
                 for n in m.TimePeriods 
                 if n >= t and n <= t + value(m.MinimumUpTime[g]) - 1
-            ) >= m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.prev(t)])
+            ) + m.SlackUpSubsequent_plus[g, t] - m.SlackUpSubsequent_neg[g, t] >= m.MinimumUpTime[g] * (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.prev(t)])
     else:
         # Handle the final (MinimumUpTime[g] - 1) time periods - if a unit is 
         # started up in this interval, it must remain on-line until the end of 
@@ -587,12 +587,12 @@ def enforce_up_time_constraints_subsequent(m, g, t):
             return sum(
                 m.UnitOn[g, n] - (m.UnitOn[g, t] - m.UnitOnT0[g])
                 for n in m.TimePeriods if n >= t
-            ) >= 0.0
+            ) + m.SlackUpSubsequent_plus[g, t] - m.SlackUpSubsequent_neg[g, t] >= 0.0
         else:
             return sum(
                 m.UnitOn[g, n] - (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.prev(t)]) 
                 for n in m.TimePeriods if n >= t
-            ) >= 0.0
+            ) + m.SlackUpSubsequent_plus[g, t] - m.SlackUpSubsequent_neg[g, t] >= 0.0
 
 #############################################
 # Down-time constraints
@@ -607,7 +607,7 @@ def enforce_down_time_constraints_initial(m, g):
     #    for g in m.ThermalGenerators 
         for t in m.TimePeriods
         if m.TimePeriods.value.index(t) < value(m.InitialTimePeriodsOffLine[g])
-    ) == 0.0
+   ) + m.SlackDnInitial_plus[g] - m.SlackDnInitial_neg[g] == 0.0
 
 
 # constraint for each time period after that not involving the initial condition.
@@ -627,13 +627,13 @@ def enforce_down_time_constraints_subsequent(m, g, t):
                 1 - m.UnitOn[g, n]
                 for n in m.TimePeriods 
                 if n >= t and n <= t + value(m.MinimumDownTime[g]) - 1
-            ) >= m.MinimumDownTime[g] * (m.UnitOnT0[g] - m.UnitOn[g, t])
+            ) + m.SlackDnSubsequent_plus[g, t] - m.SlackDnSubsequent_neg[g, t] >= m.MinimumDownTime[g] * (m.UnitOnT0[g] - m.UnitOn[g, t])
         else:
             return sum(
                 1 - m.UnitOn[g, n] 
                 for n in m.TimePeriods 
                 if n >= t and n <= t + value(m.MinimumDownTime[g]) - 1
-            ) >= m.MinimumDownTime[g] * (m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t])
+            ) + m.SlackDnSubsequent_plus[g, t] - m.SlackDnSubsequent_neg[g, t] >= m.MinimumDownTime[g] * (m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t])
     else:
         # handle the final (MinimumDownTime[g] - 1) time periods - if a unit is 
         # shut down in this interval, it must remain off-line until the end of 
@@ -642,12 +642,12 @@ def enforce_down_time_constraints_subsequent(m, g, t):
             return sum(
                 (1 - m.UnitOn[g, n]) - (m.UnitOnT0[g] - m.UnitOn[g, t])
                 for n in m.TimePeriods if n >= t
-            ) >= 0.0
+            ) + m.SlackDnSubsequent_plus[g, t] - m.SlackDnSubsequent_neg[g, t] >= 0.0
         else:
             return sum(
                 (1 - m.UnitOn[g, n]) - (m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]) 
                 for n in m.TimePeriods if n >= t
-            ) >= 0.0
+            ) + m.SlackDnSubsequent_plus[g, t] - m.SlackDnSubsequent_neg[g, t] >= 0.0
 
 
 #############################################
@@ -783,6 +783,29 @@ def compute_total_reserve_shortage_cost_rule(m):
         for t in m.TimePeriods
     )
 
+# Compute the penalty cost associated with slack variables
+def SlackPenalty_rule(m):
+    return 10000000*sum(
+       m.OverCommit[t] + 
+       sum(
+           m.SlackUpSubsequent_plus[g, t] + 
+           m.SlackUpSubsequent_neg[g, t] +
+           m.SlackDnSubsequent_plus[g, t] + 
+           m.SlackDnSubsequent_neg[g, t] +
+           m.SlackRamp1_neg[g, t] + 
+           m.SlackRamp2_neg[g, t] +
+           m.SlackRamp3_neg[g, t]
+           for g in m.ThermalGenerators
+       ) 
+       for t in m.TimePeriods
+   ) + 10000000*sum(
+       m.SlackUpInitial_plus[g] + 
+       m.SlackUpInitial_neg[g] +
+       m.SlackDnInitial_plus[g] + 
+       m.SlackDnInitial_neg[g] 
+       for g in m.ThermalGenerators
+   )
+
 # Objectives
 def total_cost_objective_rule(m):
     return (
@@ -790,7 +813,11 @@ def total_cost_objective_rule(m):
         m.TotalFixedCost + 
         m.TotalCurtailmentCost + 
         m.TotalReserveShortageCost
-    )
+    ) + m.SlackPenalty
+
+# Additional dispatch limits for RTUC
+def EnforceGeneratorOutputLimitsDispacth_rule(m, g, t):
+    return m.MaximumPowerAvailable[g, t] <= m.DispatchLimitsUpper[g, t]
 
 def create_model(
     network,
@@ -802,6 +829,8 @@ def create_model(
     dict_UnitOnT0State=None, # How many time periods the units have been on at T0 from last RTUC model
     dict_PowerGeneratedT0=None, # Initial power generation level at T0 from last RTUC model
     dict_uniton_da=None, # Slow units commitment statuses from DAUC model
+    ##############################
+    dict_DispatchLimitsUpper=None, # Only apply for slow units
 ):
     model = ConcreteModel()
     model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
@@ -822,8 +851,8 @@ def create_model(
     model.HydroGenerators      = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Hydro'].index)
     model.WindGenerators       = Set(initialize=[i for i in network.df_gen.index if i.startswith('wind')])
 
-    if dict_uniton_da:
-        set_slow = set( i[0] for i in dict_uniton_da.iterkeys() )
+    # if dict_uniton_da:
+    #     set_slow = set( i[0] for i in dict_uniton_da.iterkeys() )
         # model.ThermalGenerators_slow = Set(
         #     initialize=set_slow,
         #     within=model.ThermalGenerators
@@ -1202,10 +1231,27 @@ def create_model(
     # Reserve shortage penalty cost
     model.TotalReserveShortageCost = Var(initialize=0.0, within=NonNegativeReals)
 
+    # Slack variables
+    model.OverCommit = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackUpInitial_plus = Var(model.ThermalGenerators, initialize=0.0, within=NonNegativeReals)
+    model.SlackUpInitial_neg  = Var(model.ThermalGenerators, initialize=0.0, within=NonNegativeReals)
+    model.SlackUpSubsequent_plus = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackUpSubsequent_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackDnInitial_plus = Var(model.ThermalGenerators, initialize=0.0, within=NonNegativeReals)
+    model.SlackDnInitial_neg  = Var(model.ThermalGenerators, initialize=0.0, within=NonNegativeReals)
+    model.SlackDnSubsequent_plus = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackDnSubsequent_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackRamp1_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackRamp2_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackRamp3_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+
     """CONSTRAINTS"""
     ############################################
     # supply-demand constraints                #
     ############################################
+    model.SlackPenalty = Expression(
+        rule = SlackPenalty_rule
+    )
     model.DefineHourlyCurtailment = Constraint(
         model.TimePeriods, rule=definition_hourly_curtailment_rule
     )
@@ -1364,5 +1410,25 @@ def create_model(
     model.TotalCostObjective = Objective(
         rule=total_cost_objective_rule, sense=minimize
     )
+
+    #############################################
+    # Dispatch limits constriants for slow-ramping units in RTUC
+    #############################################
+    if dict_DispatchLimitsUpper:
+        model.ThermalGenerators_slow = Set(
+            initialize={k[0] for k in dict_DispatchLimitsUpper.iterkeys()},
+            within=model.ThermalGenerators,
+        )
+        model.DispatchLimitsUpper = Param(
+            model.ThermalGenerators_slow,
+            model.TimePeriods,
+            within=NonNegativeReals, 
+            initialize=dict_DispatchLimitsUpper,
+        )
+        model.EnforceGeneratorOutputLimitsDispacth = Constraint(
+            model.ThermalGenerators_slow,
+            model.TimePeriods,
+            rule=EnforceGeneratorOutputLimitsDispacth_rule
+        )
 
     return model
