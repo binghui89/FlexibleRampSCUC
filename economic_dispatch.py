@@ -1,28 +1,28 @@
 from pyomo.environ import *
 from SCUC_RampConstraint_3 import MyDataFrame
 
-def dispatch_limits(instance_ha, ls_t_dispatch, df_timesequence):
-    dict_upperdispatchlimit = dict()
-    dict_lowerdispatchlimit = dict()
-    for g in instance_ha.ThermalGenerators.iterkeys():
-        for t5 in ls_t_dispatch:
-            tQ = df_timesequence.loc[df_timesequence['t5'] == t5, 'tQ'].tolist()[0] # There should be only one value in the list
-            dict_upperdispatchlimit[g, t5] = max(
-                0,
-                value(
-                    instance_ha.PowerGenerated[g, tQ] + 
-                    instance_ha.RegulatingReserveUpAvailable[g, tQ] +
-                    instance_ha.SpinningReserveUpAvailable[g, tQ]
-                )
-            )
-            dict_lowerdispatchlimit[g, t5] = max(
-                0,
-                value(
-                    instance_ha.PowerGenerated[g, tQ] - 
-                    instance_ha.RegulatingReserveDnAvailable[g, tQ]
-                )
-            )
-    return dict_upperdispatchlimit, dict_lowerdispatchlimit
+# def dispatch_limits(instance_ha, ls_t_dispatch, df_timesequence):
+#     dict_upperdispatchlimit = dict()
+#     dict_lowerdispatchlimit = dict()
+#     for g in instance_ha.ThermalGenerators.iterkeys():
+#         for t5 in ls_t_dispatch:
+#             tQ = df_timesequence.loc[df_timesequence['t5'] == t5, 'tQ'].tolist()[0] # There should be only one value in the list
+#             dict_upperdispatchlimit[g, t5] = max(
+#                 0,
+#                 value(
+#                     instance_ha.PowerGenerated[g, tQ] + 
+#                     instance_ha.RegulatingReserveUpAvailable[g, tQ] +
+#                     instance_ha.SpinningReserveUpAvailable[g, tQ]
+#                 )
+#             )
+#             dict_lowerdispatchlimit[g, t5] = max(
+#                 0,
+#                 value(
+#                     instance_ha.PowerGenerated[g, tQ] - 
+#                     instance_ha.RegulatingReserveDnAvailable[g, tQ]
+#                 )
+#             )
+#     return dict_upperdispatchlimit, dict_lowerdispatchlimit
 
 def build_sced_model(
     #########
@@ -40,6 +40,7 @@ def build_sced_model(
     # The following parameters only apply for the ED model
     # dict_UpperDispatchLimit=None,
     # dict_LowerDispatchLimit=None,
+    dict_DispatchLimitsUpper=None, # Only apply for slow units
 ):
 
     model = ConcreteModel()
@@ -785,5 +786,29 @@ def build_sced_model(
     def total_cost_objective_rule(m):
         return m.TotalProductionCost + m.TotalCurtailmentCost
     model.TotalCostObjective = Objective(rule=total_cost_objective_rule, sense=minimize)
+
+    #############################################
+    # Dispatch limits constriants for *ALL* thermal units
+    #############################################
+
+    # Additional dispatch limits for RTUC
+    def EnforceGeneratorOutputLimitsDispacth_rule(m, g, t):
+        return m.MaximumPowerAvailable[g, t] <= m.DispatchLimitsUpper[g, t]
+    if dict_DispatchLimitsUpper:
+        # model.ThermalGenerators_slow = Set(
+        #     initialize={k[0] for k in dict_DispatchLimitsUpper.iterkeys()},
+        #     within=model.ThermalGenerators,
+        # )
+        model.DispatchLimitsUpper = Param(
+            model.ThermalGenerators,
+            model.TimePeriods,
+            within=NonNegativeReals, 
+            initialize=dict_DispatchLimitsUpper,
+        )
+        model.EnforceGeneratorOutputLimitsDispacth = Constraint(
+            model.ThermalGenerators,
+            model.TimePeriods,
+            rule=EnforceGeneratorOutputLimitsDispacth_rule
+        )
 
     return model
