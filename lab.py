@@ -734,10 +734,10 @@ if __name__ == "__main__":
     # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
     # csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
     # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
-    # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/ha_load.csv'
-    # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/ha_generator.csv'
-    # csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/ed_load.csv'
-    # csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/ed_generator.csv'
+    # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_load.csv'
+    # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_generator.csv'
+    # csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_load.csv'
+    # csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_generator.csv'
 
     # 118 bus system
     csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
