@@ -719,29 +719,10 @@ if __name__ == "__main__":
     ############################################################################
     # End of Cong's one year run
 
-    # content = 'UC model test.\n'
-    # if content:
-    #     content += '\n'
-    #     content += 'Time consumption: {:>.2f} s'.format(time() - t0)
-    #     if len(sys.argv) > 1:
-    #         mail_pass = sys.argv[1]
-    #         mailto_list = ['reagan.fruit@gmail.com']
-    #         # content = "The model run is completed!"
-    #         # if os.path.isfile('lab.out'):
-    #         #     with open('lab.out', 'r') as myfile:
-    #         #         content = myfile.readlines()
-    #         #         content = ''.join(content)
-    #         if send_mail(
-    #             mailto_list,
-    #             "Model run completed.",
-    #             content,
-    #             mail_pass
-    #         ):
-    #             print "Email sent successfully!"  
-    #         else:  
-    #             print "Email sent failed."
 
     # extract_all_scenarios()
+
+    content = ''
 
     # TX 2000 bus system
     # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
@@ -807,18 +788,22 @@ if __name__ == "__main__":
         RegulatingReserveFactor,
         nI=1,
     )
-    print('Model created at: {:>.2f} s'.format(time() - t0))
+    msg = 'Model created at: {:>.2f} s'.format(time() - t0)
+    print(msg)
+    content += msg
+    content += '\n'
 
     instance = model
     optimizer = SolverFactory('cplex')
     results = optimizer.solve(instance)
     instance.solutions.load_from(results)
-    print(
-            'Model solved at: {:>.2f} s, objective: {:>.2f}'.format(
-                time() - t0,
-                value(instance.TotalCostObjective)
-            )
+    msg = 'Model solved at: {:>.2f} s, objective: {:>.2f}'.format(
+            time() - t0,
+            value(instance.TotalCostObjective)
         )
+    print(msg)
+    content += msg
+    content += '\n'
     # End of DAUC
     ############################################################################
 
@@ -926,7 +911,10 @@ if __name__ == "__main__":
             dict_uniton_ha,
             dict_DispacthLimitsUpper
         )
-        print "RTUC Model {} created!".format(i_rtuc)
+        msg = "RTUC Model {} created!".format(i_rtuc)
+        print msg
+        content += msg
+        content += '\n'
 
         # Solve RTUC model
         try:
@@ -935,7 +923,7 @@ if __name__ == "__main__":
             print 'Cannot solve RTUC model!'
             IP()
         ins_ha.solutions.load_from(results)
-        print(
+        msg = (
             'RTUC Model {} '
             'solved at: {:>.2f} s, '
             'objective: {:>.2f}, '
@@ -948,6 +936,9 @@ if __name__ == "__main__":
                 value(ins_ha.SlackPenalty),
             )
         )
+        print(msg)
+        content += msg
+        content += '\n'
         ls_instance.append(ins_ha)
 
         ########################################################################
@@ -1019,7 +1010,7 @@ if __name__ == "__main__":
             # Solve the model
             results_ed = optimizer.solve(ins_ed)
             ins_ed.solutions.load_from(results)
-            print (
+            msg = (
                 '    RTED Model {} '
                 'solved at: {:>.2f} s, '
                 'objective: {:>.2f}, '
@@ -1030,6 +1021,9 @@ if __name__ == "__main__":
                     'N/A' # value(ins_ha.SlackPenalty)
                 )
             )
+            print msg
+            content += msg
+            content += '\n'
 
             # Extract initial parameters from the binding interval for the next run
             dict_UnitOnT0State_ed = return_unitont0state(
@@ -1049,3 +1043,22 @@ if __name__ == "__main__":
         if value(ins_ha.SlackPenalty) > 1E-5:
             print 'Infeasibility detected!'
             IP()
+
+    if content:
+        if len(sys.argv) > 1:
+            mail_pass = sys.argv[1]
+            mailto_list = ['reagan.fruit@gmail.com']
+            # content = "The model run is completed!"
+            # if os.path.isfile('lab.out'):
+            #     with open('lab.out', 'r') as myfile:
+            #         content = myfile.readlines()
+            #         content = ''.join(content)
+            if send_mail(
+                mailto_list,
+                "Model run completed.",
+                content,
+                mail_pass
+            ):
+                print "Email sent successfully!"  
+            else:  
+                print "Email sent failed."
