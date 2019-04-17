@@ -398,6 +398,13 @@ def build_sced_model(
     # Reserve shortage penalty cost
     model.TotalReserveShortageCost = Var(initialize=0.0, within=NonNegativeReals)
     
+    # Slack variables
+    model.OverCommit = Var(model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackRamp1_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackRamp2_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+    model.SlackRamp3_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
+
+
     """CONSTRAINTS"""
     ############################################
     # supply-demand constraints                #
@@ -421,7 +428,7 @@ def build_sced_model(
     ) 
 
     def production_equals_demand_rule(m, t):
-        return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) + m.Curtailment[t] == m.Demand[t]
+        return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) + m.Curtailment[t] - m.OverCommit[t] == m.Demand[t]
 
     # def production_equals_demand_rule_b(m):
     #     return sum(m.PowerGenerated[g] for g in m.AllGenerators)  >= m.Demand
@@ -529,14 +536,14 @@ def build_sced_model(
         #                                    degenerate upper bound due to unit off)
         # (1, 1) - unit staying on:    RHS = standard ramp limit
         if t == m.TimePeriods.first():
-            return m.MaximumPowerAvailable[g, t] <= (
+            return m.MaximumPowerAvailable[g, t] - m.SlackRamp1_neg[g, t] <= (
                 m.PowerGeneratedT0[g] 
                 + m.NominalRampUpLimit[g] * m.UnitOnT0[g] 
                 + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOnT0[g]) 
                 + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
             )
         else:
-            return m.MaximumPowerAvailable[g, t] <= (
+            return m.MaximumPowerAvailable[g, t] - m.SlackRamp1_neg[g, t] <= (
                 m.PowerGenerated[g, m.TimePeriods.prev(t)] 
                 + m.NominalRampUpLimit[g] * m.UnitOn[g, m.TimePeriods.prev(t)] 
                 + m.StartupRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.prev(t)]) 
@@ -554,7 +561,7 @@ def build_sced_model(
         if t == m.TimePeriods.last():
             return Constraint.Skip
         else:
-            return m.MaximumPowerAvailable[g, t] <= (
+            return m.MaximumPowerAvailable[g, t] - m.SlackRamp2_neg[g, t] <= (
                 m.MaximumPowerOutput[g] * m.UnitOn[g, m.TimePeriods.next(t)] 
                 + m.ShutdownRampLimit[g] * (m.UnitOn[g, t] - m.UnitOn[g, m.TimePeriods.next(t)])
             )
@@ -569,7 +576,7 @@ def build_sced_model(
         # (1, 0) - unit switching off: RHS = shutdown ramp limit 
         # (1, 1) - unit staying on:    RHS = standard ramp-down limit 
         if t == m.TimePeriods.first():
-            return m.PowerGeneratedT0[g] - m.PowerGenerated[g, t] <= (
+            return m.PowerGeneratedT0[g] - m.PowerGenerated[g, t]- m.SlackRamp3_neg[g, t] <= (
                 m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
                 + m.ShutdownRampLimit[g] * (m.UnitOnT0[g] - m.UnitOn[g, t]) 
                 + m.MaximumPowerOutput[g] * (1 - m.UnitOnT0[g])
@@ -578,7 +585,7 @@ def build_sced_model(
             return (
                 m.PowerGenerated[g, m.TimePeriods.prev(t)] 
                 - m.PowerGenerated[g, t] 
-            ) <= (
+            ) - m.SlackRamp3_neg[g, t] <= (
                 m.NominalRampDownLimit[g] * m.UnitOn[g, t] 
                 + m.ShutdownRampLimit[g] * (m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]) 
                 + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, m.TimePeriods.prev(t)])
@@ -777,6 +784,21 @@ def build_sced_model(
         )
     model.ComputeTotalCurtailmentCost = Constraint(rule=compute_total_curtailment_cost_rule)
 
+    def SlackPenalty_rule(m):
+        return 10000000*sum(
+        m.OverCommit[t] + 
+        sum(
+            m.SlackRamp1_neg[g, t] + 
+            m.SlackRamp2_neg[g, t] +
+            m.SlackRamp3_neg[g, t]
+            for g in m.ThermalGenerators
+        ) 
+        for t in m.TimePeriods
+    )
+    model.SlackPenalty = Expression(
+        rule = SlackPenalty_rule
+    )
+
     #---------------------------------------------------------------
 
     #-------------------------------------------------------------
@@ -784,7 +806,7 @@ def build_sced_model(
     #
    
     def total_cost_objective_rule(m):
-        return m.TotalProductionCost + m.TotalCurtailmentCost
+        return m.TotalProductionCost + m.TotalCurtailmentCost + m.SlackPenalty
     model.TotalCostObjective = Objective(rule=total_cost_objective_rule, sense=minimize)
 
     #############################################

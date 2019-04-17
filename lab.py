@@ -1,7 +1,7 @@
 from __future__ import division
 import os, sys, platform, datetime, smtplib, multiprocessing, pandas as pd, numpy as np, matplotlib
 from time import time
-from pyomo.opt import SolverFactory
+from pyomo.opt import SolverFactory, SolverStatus, TerminationCondition
 from postprocessing import store_csvs
 from pyomo.environ import *
 from helper import import_scenario_data, extract_uniton
@@ -854,6 +854,7 @@ if __name__ == "__main__":
 
     # Economic dispatch results
     df_POWER_RTED_BINDING = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
+    df_POWER_RTED_ADVISRY = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
     df_REGUP_RTED_BINDING = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
     df_REGDN_RTED_BINDING = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
 
@@ -966,7 +967,8 @@ if __name__ == "__main__":
     dict_PowerGeneratedT0_ed = None
 
     # Start real-time simulations, RTUC and RTED
-    ls_instance = list()
+    ls_ins_ha = list()
+    ls_ins_ed   = list()
     for i_rtuc in range(1, 94):
         t_start = i_rtuc # 4*(i_rtuc-1) + 1
         t_end   = i_rtuc + 3 # 4*i_rtuc
@@ -1006,7 +1008,17 @@ if __name__ == "__main__":
         except:
             print 'Cannot solve RTUC model!'
             IP()
+
+        if results.solver.termination_condition == TerminationCondition.infeasible:
+            print 'Infeasibility detected in the RTUC model!'
+            IP()
+
         ins_ha.solutions.load_from(results)
+        if hasattr(ins_ha, 'SlackPenalty'):
+            if value(ins_ha.SlackPenalty) > 1E-5:
+                print 'Infeasibility detected!'
+                IP()
+
         msg = (
             'RTUC Model {} '
             'solved at: {:>.2f} s, '
@@ -1023,7 +1035,7 @@ if __name__ == "__main__":
         print(msg)
         content += msg
         content += '\n'
-        ls_instance.append(ins_ha)
+        ls_ins_ha.append(ins_ha)
 
         ########################################################################
         # Start RTED
@@ -1092,22 +1104,36 @@ if __name__ == "__main__":
             )
 
             # Solve the model
-            results_ed = optimizer.solve(ins_ed)
+            try:
+                results_ed = optimizer.solve(ins_ed)
+            except:
+                print 'Cannot solve RTED model!'
+                IP()
+
+            if (results_ed.solver.termination_condition == TerminationCondition.infeasible):
+                print 'Infeasibility detected in the RTED model!'
+                IP()
+
             ins_ed.solutions.load_from(results)
+            if hasattr(ins_ed, 'SlackPenalty'):
+                if value(ins_ed.SlackPenalty) > 1E-3:
+                    print 'Infeasibility detected in the RTED model!'
+                    IP()
             msg = (
                 '    RTED Model {} '
                 'solved at: {:>.2f} s, '
                 'objective: {:>.2f}, '
-                'penalty: {:s}'.format(
+                'penalty: {:>.2f}'.format(
                     t_start_ed, 
                     time() - t0,
                     value(ins_ed.TotalCostObjective),
-                    'N/A' # value(ins_ha.SlackPenalty)
+                    value(ins_ed.SlackPenalty),
                 )
             )
             print msg
             content += msg
             content += '\n'
+            ls_ins_ed.append(ins_ed)
 
             # End of RTED
             ####################################################################
@@ -1147,6 +1173,7 @@ if __name__ == "__main__":
                 #     # ramp_up_agc and ramp_dn_agc values of non-thermal gens?
 
             df_POWER_RTED_BINDING.loc[t_start_ed, :] = pd.Series(dict_dispatch_binding)
+            df_POWER_RTED_ADVISRY.loc[t_start_ed, :] = pd.Series(dict_dispatch_advisory)
             df_REGUP_RTED_BINDING.loc[t_start_ed, :] = pd.Series(dict_reg_up_agc)
             df_REGDN_RTED_BINDING.loc[t_start_ed, :] = pd.Series(dict_reg_dn_agc)
             df_REGUP_RTED_BINDING.loc[t_start_ed, :].fillna(0, inplace=True)
@@ -1322,6 +1349,8 @@ if __name__ == "__main__":
                 df_AGC_MOVE.loc[t_AGC, :]     = df_agc_tmp.loc[:, 'AGC_MOVE']
                 df_AGC_TARGET.loc[t_AGC, :]   = df_agc_tmp.loc[:, 'ACE_TARGET']
 
+                df_AGC_SCHEDULE[df_AGC_SCHEDULE < 0] = 0 # Fix numerical errors
+
                 ################################################################
                 # The following code is adapted from FESTIV's implementation
                 ################################################################
@@ -1421,14 +1450,14 @@ if __name__ == "__main__":
             # )
             dict_PowerGeneratedT0_ed = df_AGC_SCHEDULE.loc[t_AGC, network.dict_gens['Thermal']].to_dict()
 
+            # This is for debugging
+            # if t_start_ed == 4:
+            #     IP()
+
         # Extract initial parameters from the binding interval of the last ED run for the next RTUC run
         dict_UnitOnT0State = return_unitont0state(ins_ha, ins_ha.TimePeriods.first())
         # dict_PowerGeneratedT0 = return_powergenerated_t(ins_ha, ins_ha.TimePeriods.first())
         dict_PowerGeneratedT0 = dict_PowerGeneratedT0_ed
-
-        if value(ins_ha.SlackPenalty) > 1E-5:
-            print 'Infeasibility detected!'
-            IP()
 
     df_ACE = pd.DataFrame(dict_ACE)
 
