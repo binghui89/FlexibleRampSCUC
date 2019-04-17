@@ -1299,10 +1299,18 @@ if __name__ == "__main__":
                 # First, determine RTED scheduled movement during one AGC 
                 # interval for reg non-responding units, note AGC_MOVE can be 
                 # either positive or negative 
+
+                # Use the initial actual generation and next adivsory dispatch 
+                # level to determine the RTED scheduled movement, to avoid 
+                # generation falling below minimum thermal power level
                 df_agc_tmp.loc[~(i_reg_up_units | i_reg_dn_units), 'AGC_MOVE'] = (
                     + t_AGC/(nI_agc/nI_ed)*(
                         df_agc_tmp.loc[:, 'ED_DISPATCH_NEXT'] 
-                        - df_agc_tmp.loc[:, 'ED_DISPATCH']
+                        # - df_agc_tmp.loc[:, 'ED_DISPATCH']
+                        - df_ACTUAL_GENERATION.loc[
+                            int( (t_start_ed-1)*nI_agc/nI_ed+1 ), 
+                            :
+                        ]
                     )
                 )
 
