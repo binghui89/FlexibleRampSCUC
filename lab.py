@@ -852,11 +852,16 @@ if __name__ == "__main__":
 
     # Result container
 
+    # RTUC results
+    df_UNITON_RTUC_BINDING = MyDataFrame(index=df_genfor_ha.index, columns=network.dict_gens['Thermal'])
+    df_UNITON_RTUC_ADVISRY = MyDataFrame(index=df_genfor_ha.index, columns=network.dict_gens['Thermal'])
+
     # Economic dispatch results
     df_POWER_RTED_BINDING = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
     df_POWER_RTED_ADVISRY = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
     df_REGUP_RTED_BINDING = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
     df_REGDN_RTED_BINDING = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
+    df_SPNUP_RTED_BINDING = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
 
     # AGC results
     df_ACTUAL_GENERATION = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
@@ -922,7 +927,9 @@ if __name__ == "__main__":
             for i in range(4*(h-1)+1, 4*h+1):
                 df_uniton_ha.loc[i, g] = v
 
-    # Create dispatch upper limits for commited slow-ramping (<1 hr) units at RTUC time scale, need to figure out a faster way, maybe combined with at the ED scale
+    # Create dispatch upper limits for commited slow-ramping (<1 hr) units at 
+    # RTUC time scale, need to figure out a faster way, maybe combined with at 
+    # the ED scale
     df_DispatchLimits_slow = MyDataFrame(index=df_uniton_ha.index)
     for g in df_uniton_ha.columns:
         r = value(instance.NominalRampDownLimit[g])/nI_ha
@@ -941,7 +948,8 @@ if __name__ == "__main__":
                     pmax
                 )
 
-    # Create dispatch upper limits for commited slow-ramping (<1 hr) units at RTED time scale, need to figure out a faster way
+    # Create dispatch upper limits for commited slow-ramping (<1 hr) units at
+    # the RTED time scale, need to figure out a faster way
     df_DispatchLimits_slow_ED = MyDataFrame(index=df_timesequence['t5'])
     for g in df_uniton_ha.columns:
         r = value(instance.NominalRampDownLimit[g])/nI_ed
@@ -1016,7 +1024,7 @@ if __name__ == "__main__":
         ins_ha.solutions.load_from(results)
         if hasattr(ins_ha, 'SlackPenalty'):
             if value(ins_ha.SlackPenalty) > 1E-5:
-                print 'Infeasibility detected!'
+                print 'Infeasibility detected in the RTUC model!'
                 IP()
 
         msg = (
@@ -1036,6 +1044,13 @@ if __name__ == "__main__":
         content += msg
         content += '\n'
         ls_ins_ha.append(ins_ha)
+
+        # Save RTUC results
+        t_binding_ha = t_start
+        t_advisry_ha = ins_ha.TimePeriods.next(t_binding_ha)
+        for g in ins_ha.ThermalGenerators:
+            df_UNITON_RTUC_BINDING.at[t_start, g] = value(ins_ha.UnitOn[g, t_binding_ha])
+            df_UNITON_RTUC_ADVISRY.at[t_start, g] = value(ins_ha.UnitOn[g, t_advisry_ha])
 
         ########################################################################
         # Start RTED
@@ -1057,7 +1072,7 @@ if __name__ == "__main__":
         for g in ins_ha.ThermalGenerators:
             if g in df_DispatchLimits_slow_ED.columns: # Slow units, read directly from the previous results
                 df_DispatchLimits[g] = df_DispatchLimits_slow_ED.loc[df_DispatchLimits.index, g]
-            else: # Fast units, we need to calculate
+            else: # Fast units, we need to calculate, how to save time on this one?
                 r = value(instance.NominalRampDownLimit[g])/nI_ed
                 rsd = value(instance.ShutdownRampLimit[g])
                 pmax = value(instance.MaximumPowerOutput[g])
@@ -1077,7 +1092,8 @@ if __name__ == "__main__":
         for t_start_ed in ls_t_ed:
             t_end_ed = t_start_ed + 5 # Total 6 ED intervals, 1 binding interval, 5 look-ahead interval, 30 min in total
 
-            # Obtain commitment statuses of slow-starting units from DAUC model, can we do this out of the for-loop?
+            # Obtain commitment statuses of slow-starting units from DAUC 
+            # model, can we do this out of the for-loop?
             dict_uniton_ed = dict()
             for t5 in range(t_start_ed, t_end_ed+1):
                 tQ = df_timesequence.loc[df_timesequence['t5'] == t5, 'tQ'].tolist()[0]
@@ -1137,47 +1153,93 @@ if __name__ == "__main__":
 
             # End of RTED
             ####################################################################
+            # Use df_timesequence in the future
+            t_start_agc = int( (t_start_ed-1)*nI_agc/nI_ed+1 )
+            t_end_agc   = int( nI_agc/nI_ed*t_start_ed ) 
 
             # Gather information for the AGC run
             ls_curtail_binding   = list()
             ls_nocurtail_binding = list()
-            for g in network.dict_gens['Non thermal']:
-                if value(ins_ed.PowerGenerated[g, t_start_ed]) < value(ins_ed.PowerForecast[g, t_start_ed]):
-                    ls_curtail_binding.append(g)
-                else:
-                    ls_nocurtail_binding.append(g)
+            # for g in network.dict_gens['Non thermal']:
+            #     if value(ins_ed.PowerGenerated[g, t_start_ed]) < value(ins_ed.PowerForecast[g, t_start_ed]):
+            #         ls_curtail_binding.append(g)
+            #     else:
+            #         ls_nocurtail_binding.append(g)
 
             # Gather dispatch setting point, reserve and ramp available for AGC
             # Can we use a numpy array or a pandas data frame?
             dict_dispatch_binding  = dict() # Dispatch setting point at this interval, MW
             dict_dispatch_advisory = dict() # Dispatch setting point at the next interval, MW
-            dict_reg_up_agc = dict() # Reg-up for thermal gens, MW, only non-zeros
-            dict_reg_dn_agc = dict() # Reg-down for thermal gens, MW, only non-zeros
-            dict_ramp_up_agc = dict() # Ramp up capacity across one AGC interval, MW/AGC interval, only online units
-            dict_ramp_dn_agc = dict() # Ramp down capacity across one AGC interval, MW/AGC interval, only online units
+            dict_reg_up_agc   = dict() # Reg-up for thermal gens, MW, only non-zeros
+            dict_reg_dn_agc   = dict() # Reg-down for thermal gens, MW, only non-zeros
+            dict_spn_up_agc   = dict() # Spinning reserve, MW, only up, only non-zeros
+            dict_ramp_up_agc  = dict() # Ramp up capacity across one AGC interval, MW/AGC interval, only online units
+            dict_ramp_dn_agc  = dict() # Ramp down capacity across one AGC interval, MW/AGC interval, only online units
+            dict_start_up_agc = dict()
+            dict_shut_dn_agc  = dict()
+
+            # Start-up and shut-down status
+            # df_uniton_agc = MyDataFrame(
+            #     index = range(t_start_agc, t_end_agc+1),
+            #     columns=network.dict_gens['Thermal'],
+            # )
             for g in ins_ed.AllGenerators.iterkeys():
                 dict_dispatch_binding[g]  = value(ins_ed.PowerGenerated[g, t_start_ed])
                 dict_dispatch_advisory[g] = value(ins_ed.PowerGenerated[g, ins_ed.TimePeriods.next(t_start_ed)]) # What if there is no next?
                 if g in ins_ed.ThermalGenerators: # In our case, only thermal gens provide regulation
                     reg_up = value(ins_ed.RegulatingReserveUpAvailable[g, t_start_ed])
                     reg_dn = value(ins_ed.RegulatingReserveDnAvailable[g, t_start_ed])
-                    if abs(reg_up) > 1E-3:
-                        dict_reg_up_agc[g] = reg_up
-                    if abs(reg_dn) > 1E-3:
-                        dict_reg_dn_agc[g] = reg_dn
-                    if abs(value(ins_ed.UnitOn[g, t_start_ed])-1) < 1e-3:
+                    spn_up = value(ins_ed.SpinningReserveUpAvailable[g, t_start_ed])
+                    dict_reg_up_agc[g] = reg_up
+                    dict_reg_dn_agc[g] = reg_dn
+                    dict_spn_up_agc[g] = spn_up
+                    # if abs(value(ins_ed.UnitOn[g, t_start_ed])-1) < 1e-3:
+                    #     dict_ramp_up_agc[g] = value(ins_ed.NominalRampUpLimit[g])/(nI_agc/nI_ed)
+                    #     dict_ramp_dn_agc[g] = value(ins_ed.NominalRampDownLimit[g])/(nI_agc/nI_ed)
+                    if abs(
+                        value(ins_ed.UnitOn[g, t_start_ed]) 
+                        -
+                        value(ins_ed.UnitOnT0[g]) 
+                        - 
+                        1
+                    ) < 1e-3: # Unit is starting up
+                        dict_ramp_up_agc[g] = value(ins_ed.StartupRampLimit[g])/(nI_agc/nI_ed)
+                        dict_ramp_dn_agc[g] = 0
+                    elif abs(
+                        value(ins_ed.UnitOn[g, t_start_ed]) 
+                        -
+                        value(ins_ed.UnitOnT0[g]) 
+                        + 
+                        1
+                    ) < 1e-3: # Unit is shutting down
+                        dict_ramp_up_agc[g] = 0
+                        dict_ramp_dn_agc[g] = value(ins_ed.ShutdownRampLimit[g])/(nI_agc/nI_ed)
+                    elif abs(
+                        value(ins_ed.UnitOn[g, t_start_ed])
+                        -
+                        1
+                    ) < 1e-3: # Online units going through normal ramps
                         dict_ramp_up_agc[g] = value(ins_ed.NominalRampUpLimit[g])/(nI_agc/nI_ed)
                         dict_ramp_dn_agc[g] = value(ins_ed.NominalRampDownLimit[g])/(nI_agc/nI_ed)
-                # else:
-                #     # Maybe use fillna function here, reg_up and reg_dn should be 0, if it is a non-thermal gen
-                #     # ramp_up_agc and ramp_dn_agc values of non-thermal gens?
+                    else: # Units are turned off in both time intervals
+                        dict_ramp_up_agc[g] = 0
+                        dict_ramp_dn_agc[g] = 0
+                    # for t in ins_ed.TimePeriods:
+                    #     df_uniton_agc.at[t_start_agc: t_end_agc, g] = value(ins_ed.UnitOn[g, t])
+                else: # Non-thermal genes, gather curtailment status
+                    if value(ins_ed.PowerGenerated[g, t_start_ed]) < value(ins_ed.PowerForecast[g, t_start_ed]):
+                        ls_curtail_binding.append(g)
+                    else:
+                        ls_nocurtail_binding.append(g)
 
             df_POWER_RTED_BINDING.loc[t_start_ed, :] = pd.Series(dict_dispatch_binding)
             df_POWER_RTED_ADVISRY.loc[t_start_ed, :] = pd.Series(dict_dispatch_advisory)
             df_REGUP_RTED_BINDING.loc[t_start_ed, :] = pd.Series(dict_reg_up_agc)
             df_REGDN_RTED_BINDING.loc[t_start_ed, :] = pd.Series(dict_reg_dn_agc)
+            df_SPNUP_RTED_BINDING.loc[t_start_ed, :] = pd.Series(dict_spn_up_agc)
             df_REGUP_RTED_BINDING.loc[t_start_ed, :].fillna(0, inplace=True)
             df_REGDN_RTED_BINDING.loc[t_start_ed, :].fillna(0, inplace=True)
+            df_SPNUP_RTED_BINDING.loc[t_start_ed, :].fillna(0, inplace=True)
 
             df_agc_tmp = pd.DataFrame.from_dict(
                 {
@@ -1212,10 +1274,7 @@ if __name__ == "__main__":
 
             # Start of the AGC loop
             ####################################################################
-            for t_AGC in range(
-                int( (t_start_ed-1)*nI_agc/nI_ed+1 ), 
-                int( nI_agc/nI_ed*t_start_ed+1 )
-            ):
+            for t_AGC in range(t_start_agc, t_end_agc+1):
                 # Calculate actual generation
                 if t_AGC == 1:
                     dict_tmp = dict()
@@ -1238,10 +1297,19 @@ if __name__ == "__main__":
                 # Calculate ACE
                 # First, calculate line losses, bus order is the same as in network.df_ptdf column direction
                 # sparse matrix operation?
-                bus_inject = np.matmul(network.mat_busgen, df_ACTUAL_GENERATION.loc[t_AGC, network.dict_gens['ALL']].tolist()) - df_busload_full_agc.loc[t_AGC, network.df_ptdf.columns]
+                bus_inject = np.matmul(
+                    network.mat_busgen, 
+                    df_ACTUAL_GENERATION.loc[t_AGC, network.dict_gens['ALL']].tolist()
+                ) - df_busload_full_agc.loc[t_AGC, network.df_ptdf.columns]
                 flow_br = np.matmul(network.df_ptdf.values, bus_inject)
                 total_loss = sum(
-                    ((flow_br/network.baseMVA)**2*network.df_branch.loc[network.df_ptdf.index, 'BR_R'].values)*network.baseMVA
+                    (
+                        (flow_br/network.baseMVA)**2
+                        *
+                        network.df_branch.loc[network.df_ptdf.index, 'BR_R'].values
+                    )
+                    *
+                    network.baseMVA
                 ) # This is not correct by following FESTIV, how should we improve it?
                 total_gen  = df_ACTUAL_GENERATION.loc[t_AGC, network.dict_gens['ALL']].sum()
                 total_load = df_busload_agc.loc[t_AGC, ins_ed.LoadBuses.value].sum()
@@ -1268,17 +1336,27 @@ if __name__ == "__main__":
                     previous_SACE = dict_ACE['SACE'][i_s: i_e+1]
 
                 dict_ACE['Slot'].append(t_AGC)
-                dict_ACE['RAW'].append(ace_raw)
-                dict_ACE['INT'].append(ace_raw*float(t_AGC/nI_agc) + previous_ACE_int)
-                dict_ACE['ABS'].append(abs(ace_raw*float(t_AGC/nI_agc)) + previous_ACE_ABS)
+                dict_ACE['RAW' ].append(ace_raw)
+                dict_ACE['INT' ].append(ace_raw*float(t_AGC/nI_agc) + previous_ACE_int)
+                dict_ACE['ABS' ].append(abs(ace_raw*float(t_AGC/nI_agc)) + previous_ACE_ABS)
                 dict_ACE['CPS2'].append(ace_raw*(t_AGC*3600/nI_agc/(CPS2_interval_minute*60.0)) + previous_CPS2_ACE)
                 dict_ACE['SACE'].append(K1*ace_raw + K2*np.mean(previous_SACE))
 
                 # Set ACE target for AGC
-                seconds_Left_in_CPS2_interval = (CPS2_interval_minute*60.0 - (t_AGC*3600/nI_agc)%(CPS2_interval_minute*60)) # In second
+                seconds_Left_in_CPS2_interval = (
+                    CPS2_interval_minute*60.0 
+                    - 
+                    (t_AGC*3600/nI_agc) % (CPS2_interval_minute*60)
+                ) # In second
                 df_agc_tmp.loc[df_agc_tmp['AGC_MODE']=='RAW', 'ACE_TARGET']    = dict_ACE['RAW'][-1]
                 df_agc_tmp.loc[df_agc_tmp['AGC_MODE']=='SMOOTH', 'ACE_TARGET'] = dict_ACE['SACE'][-1]
-                df_agc_tmp.loc[df_agc_tmp['AGC_MODE']=='CPS2', 'ACE_TARGET']   = dict_ACE['CPS2'][-1] + dict_ACE['RAW'][-1]*(seconds_Left_in_CPS2_interval/(CPS2_interval_minute*60.0))
+                df_agc_tmp.loc[df_agc_tmp['AGC_MODE']=='CPS2', 'ACE_TARGET']   = (
+                    dict_ACE['CPS2'][-1] 
+                    + 
+                    dict_ACE['RAW'][-1]*(
+                        seconds_Left_in_CPS2_interval/(CPS2_interval_minute*60.0)
+                    )
+                )
                 df_agc_tmp.loc[
                     (df_agc_tmp['AGC_MODE'] == 'CPS2')
                     & (df_agc_tmp['DEAD_BAND'] <= L10),
@@ -1304,15 +1382,9 @@ if __name__ == "__main__":
                 # level to determine the RTED scheduled movement, to avoid 
                 # generation falling below minimum thermal power level
                 df_agc_tmp.loc[~(i_reg_up_units | i_reg_dn_units), 'AGC_MOVE'] = (
-                    + t_AGC/(nI_agc/nI_ed)*(
-                        df_agc_tmp.loc[:, 'ED_DISPATCH_NEXT'] 
-                        # - df_agc_tmp.loc[:, 'ED_DISPATCH']
-                        - df_ACTUAL_GENERATION.loc[
-                            int( (t_start_ed-1)*nI_agc/nI_ed+1 ), 
-                            :
-                        ]
-                    )
-                )
+                    df_agc_tmp.loc[:, 'ED_DISPATCH_NEXT'] 
+                    - df_ACTUAL_GENERATION.loc[int( (t_start_ed-1)*nI_agc/nI_ed+1 ), :]
+                )/(nI_agc/nI_ed) # Maybe the calculation of RTED step out of the AGC loop?
 
                 # Then, determine AGC movement for AGC responding units, we 
                 # follow FESTIV's option 2, where each unit's deployed 
@@ -1468,6 +1540,20 @@ if __name__ == "__main__":
         dict_PowerGeneratedT0 = dict_PowerGeneratedT0_ed
 
     df_ACE = pd.DataFrame(dict_ACE)
+    
+    # Write all results
+    # df_ACE.to_csv('ACE.csv', index=False)
+    # df_ACTUAL_GENERATION.to_csv('ACTUAL_GENERATION.csv')
+    # df_AGC_SCHEDULE.to_csv('AGC_SCHEDULE.csv')
+    # df_AGC_TARGET.to_csv('AGC_TARGET.csv')
+    # df_AGC_MOVE.to_csv('AGC_MOVE.csv')
+    # df_POWER_RTED_BINDING.to_csv('POWER_RTED_BINDING.csv')
+    # df_POWER_RTED_ADVISRY.to_csv('POWER_RTED_ADVISRY.csv')
+    # df_REGUP_RTED_BINDING.to_csv('REGUP_RTED_BINDING.csv')
+    # df_REGDN_RTED_BINDING.to_csv('REGDN_RTED_BINDING.csv')
+    # df_SPNUP_RTED_BINDING.to_csv('SPNUP_RTED_BINDING.csv')
+    # df_UNITON_RTUC_BINDING.to_csv('UNITON_RTUC_BINDING.csv')
+    # df_UNITON_RTUC_ADVISRY.to_csv('UNITON_RTUC_ADVISRY.csv')
 
     if content:
         if len(sys.argv) > 1:
