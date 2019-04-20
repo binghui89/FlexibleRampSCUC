@@ -866,7 +866,7 @@ if __name__ == "__main__":
     # AGC results
     df_ACTUAL_GENERATION = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
     df_AGC_SCHEDULE      = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
-    df_AGC_TARGET        = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
+    df_ACE_TARGET        = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
     df_AGC_MOVE          = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
     df_ACE               = MyDataFrame(index=df_genfor_agc.index)
     dict_ACE = {
@@ -1267,6 +1267,10 @@ if __name__ == "__main__":
             df_agc_tmp.loc[:, 'AGC_MODE']  = df_agc_param.loc[:, 'AGC_MODE']
             df_agc_tmp.loc[:, 'DEAD_BAND'] = df_agc_param.loc[:, 'DEAD_BAND']
 
+            # Copy PMIN, this part out of the loop?
+            df_agc_tmp.loc[:, 'PMIN'] = network.df_gen['PMIN']
+            df_agc_tmp.loc[:, 'PMAX'] = network.df_gen['PMAX']
+
             sum_reg_up_agc  = df_agc_tmp['REG_UP_AGC'].sum()
             sum_reg_dn_agc  = df_agc_tmp['REG_DN_AGC'].sum()
             # sum_ramp_up_agc = sum(dict_ramp_up_agc[g] for g in dict_ramp_up_agc.iterkeys())
@@ -1382,24 +1386,46 @@ if __name__ == "__main__":
                 # level to determine the RTED scheduled movement, to avoid 
                 # generation falling below minimum thermal power level
                 df_agc_tmp.loc[~(i_reg_up_units | i_reg_dn_units), 'AGC_MOVE'] = (
-                    df_agc_tmp.loc[:, 'ED_DISPATCH_NEXT'] 
+                    df_agc_tmp[['PMIN', 'ED_DISPATCH_NEXT']].max(axis=1) # Bounded below by PMIN
                     - df_ACTUAL_GENERATION.loc[int( (t_start_ed-1)*nI_agc/nI_ed+1 ), :]
                 )/(nI_agc/nI_ed) # Maybe the calculation of RTED step out of the AGC loop?
+
+                # Calculate upper/lower power limit including regulation
+                # Because in my RTED formulation, the max available power only 
+                # considers a fixed dispatch setting point + reg-up + spin-up, 
+                # while in AGC the dispatch setting point changes from this 
+                # interval continuously into the next interval, and the sum may
+                # exceed the Pmax or lower than Pmin, thus the sums must be 
+                # capped by Pmax, or floored by Pmin.
+                df_agc_tmp.loc[:, 'POWER+REGUP'] = pd.concat(
+                    [
+                        df_agc_tmp['PMAX'],
+                        df_ACTUAL_GENERATION.loc[t_AGC, :] + df_agc_tmp.loc[:, 'REG_UP_AGC']
+                    ],
+                    axis=1
+                ).min(axis=1)
+                df_agc_tmp.loc[:, 'POWER-REGDN'] = pd.concat(
+                    [
+                        df_agc_tmp['PMIN'],
+                        df_ACTUAL_GENERATION.loc[t_AGC, :] - df_agc_tmp.loc[:, 'REG_DN_AGC']
+                    ],
+                    axis=1
+                ).max(axis=1)
 
                 # Then, determine AGC movement for AGC responding units, we 
                 # follow FESTIV's option 2, where each unit's deployed 
                 # regulation is proportional to its regulation bid into the RTED market
                 df_agc_tmp.loc[i_reg_up_units, 'AGC_MOVE'] = pd.concat(
                     [
-                        df_agc_tmp.loc[:, 'REG_UP_AGC'],
-                        -df_agc_tmp.loc[:, 'ACE_TARGET']*df_agc_tmp.loc[:, 'REG_UP_AGC']/sum_reg_up_agc
+                        -df_agc_tmp.loc[:, 'ACE_TARGET']*df_agc_tmp.loc[:, 'REG_UP_AGC']/sum_reg_up_agc,
+                        df_agc_tmp.loc[:, 'POWER+REGUP'] - df_ACTUAL_GENERATION.loc[t_AGC, :],
                     ],
                     axis=1,
                 ).min(axis=1)
                 df_agc_tmp.loc[i_reg_dn_units, 'AGC_MOVE'] = pd.concat(
                     [
-                        -df_agc_tmp.loc[:, 'REG_DN_AGC'],
-                        -df_agc_tmp.loc[:, 'ACE_TARGET']*df_agc_tmp.loc[:, 'REG_DN_AGC']/sum_reg_dn_agc
+                        -df_agc_tmp.loc[:, 'ACE_TARGET']*df_agc_tmp.loc[:, 'REG_DN_AGC']/sum_reg_dn_agc,
+                        df_agc_tmp.loc[:, 'POWER-REGDN'] - df_ACTUAL_GENERATION.loc[t_AGC, :],
                     ],
                     axis=1,
                 ).max(axis=1)
@@ -1427,7 +1453,7 @@ if __name__ == "__main__":
                 ).min(axis=1) + df_agc_tmp.loc[:, 'ACTUAL_GENERATION']
                 df_AGC_SCHEDULE.loc[t_AGC, :] = df_agc_tmp.loc[:, 'AGC_BASEPOINT']
                 df_AGC_MOVE.loc[t_AGC, :]     = df_agc_tmp.loc[:, 'AGC_MOVE']
-                df_AGC_TARGET.loc[t_AGC, :]   = df_agc_tmp.loc[:, 'ACE_TARGET']
+                df_ACE_TARGET.loc[t_AGC, :]   = df_agc_tmp.loc[:, 'ACE_TARGET']
 
                 df_AGC_SCHEDULE[df_AGC_SCHEDULE < 0] = 0 # Fix numerical errors
 
@@ -1545,7 +1571,7 @@ if __name__ == "__main__":
     # df_ACE.to_csv('ACE.csv', index=False)
     # df_ACTUAL_GENERATION.to_csv('ACTUAL_GENERATION.csv')
     # df_AGC_SCHEDULE.to_csv('AGC_SCHEDULE.csv')
-    # df_AGC_TARGET.to_csv('AGC_TARGET.csv')
+    # df_ACE_TARGET.to_csv('ACE_TARGET.csv')
     # df_AGC_MOVE.to_csv('AGC_MOVE.csv')
     # df_POWER_RTED_BINDING.to_csv('POWER_RTED_BINDING.csv')
     # df_POWER_RTED_ADVISRY.to_csv('POWER_RTED_ADVISRY.csv')
