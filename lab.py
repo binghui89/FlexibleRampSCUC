@@ -670,6 +670,45 @@ def return_powergenerated_t(instance, t=None):
         dict_results[g] = max(0, v) # Sometimes it returns negative values, dunno why.
     return dict_results
 
+def return_dispatchupperlimits_from_uniton(df_uniton, ar_pmax, ar_ramp, ar_rsd):
+    '''
+    Calculate the upper dispatch limits based solely on commitment statuses, 
+    max capacity, ramp rate and shut-down ramp rates.
+    nT: Number of intervals, nG: number of generators
+    df_uniton: nT by nG dataframe of commitment statuses
+    ar_pmax: 1-dim np array of max capacity, unit: MW.
+    ar_ramp: 1-dim np array of ramp rates, unit: MW/interval.
+    ar_rsd:  1_dim np array of shut-down ramp rates: unit: MW/interval, 
+    Returns a dataframe of the size nT by nG
+    '''
+
+    mat_uniton = df_uniton.values
+    mat_dispatchlimits = np.zeros(mat_uniton.shape)
+    for i in range(mat_dispatchlimits.shape[0]-1, -1, -1):
+        if i == mat_dispatchlimits.shape[0]-1: # The last row
+            mat_dispatchlimits[i, :] = mat_uniton[i, :]*ar_pmax
+        else:
+            mat_dispatchlimits[i, :] = mat_uniton[i, :]*(
+                (mat_uniton[i, :]-mat_uniton[i+1, :])*ar_rsd 
+                + 
+                mat_uniton[i+1,:]*(mat_dispatchlimits[i+1, :]+ar_ramp)
+            )
+
+    mat_dispatchlimits = np.minimum(
+        mat_dispatchlimits, 
+        np.matlib.repmat(
+            ar_pmax,
+            mat_uniton.shape[0], 
+            1
+        )
+    )
+
+    return pd.DataFrame(
+        mat_dispatchlimits, 
+        index=df_uniton.index,
+        columns=df_uniton.columns,
+    )
+
 def examine_load():
     df_load_da = pd.read_csv('/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv', index_col=0)
     df_load_ha = pd.read_csv('/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv', index_col=['Slot'])
@@ -782,7 +821,7 @@ if __name__ == "__main__":
     network.df_bus['VOLL'] = 9000
     network.baseMVA = 100
 
-    # This is for the 118 bus system only
+    # This is to fix a bug in the 118 bus system
     if 'Hydro 31' in network.df_gen.index:
         network.df_gen.drop('Hydro 31', inplace=True)
 
@@ -794,6 +833,16 @@ if __name__ == "__main__":
     network.dict_gens['Non thermal'] = network.df_gen.index.difference(
         network.df_gen.loc[network.df_gen['GEN_TYPE']=='Thermal', 'GEN_TYPE'].index
     ).tolist()
+    network.dict_gens['Thermal_slow'] = network.df_gen[
+        (network.df_gen['MINIMUM_UP_TIME'] > 1) 
+        & 
+        (network.df_gen['GEN_TYPE']=='Thermal')
+    ].index
+    network.dict_gens['Thermal_fast'] = network.df_gen[
+        (network.df_gen['MINIMUM_UP_TIME'] <= 1) 
+        & 
+        (network.df_gen['GEN_TYPE']=='Thermal')
+    ].index
     # Bus-generator matrix
     network.ls_bus = network.df_ptdf.columns.tolist()
     network.mat_busgen=np.zeros([len(network.ls_bus), len(network.dict_gens['ALL'])])
@@ -918,55 +967,91 @@ if __name__ == "__main__":
 
     ############################################################################
     # Start RTUC
+    df_uniton_da = pd.DataFrame(index=df_genfor.index, columns=network.dict_gens['Thermal'])
+    for g, t in instance.UnitOn.iterkeys():
+        df_uniton_da.at[t, g] = value(instance.UnitOn[g, t])
 
-    # Obtain commitment statuses of slow-starting units from DAUC model
-    df_uniton_ha = MyDataFrame(index=df_genfor_ha.index)
-    for g, h in instance.UnitOn.iterkeys():
-        if value(instance.MinimumUpTime[g]) > 1:
-            v = int(value(instance.UnitOn[g, h]))
-            for i in range(4*(h-1)+1, 4*h+1):
-                df_uniton_ha.loc[i, g] = v
+    # Obtain commitment statuses of slow-starting units at RTUC time scale from 
+    # DAUC model results
+    df_uniton_slow_ha = MyDataFrame(
+        data=df_uniton_da[network.dict_gens['Thermal_slow']].values.repeat(nI_ha/nI_da, axis=0),
+        index=df_genfor_ha.index,
+        columns=network.dict_gens['Thermal_slow'],
+    )
+    # df_uniton_slow_ha = MyDataFrame(index=df_genfor_ha.index)
+    # for g in network.dict_gens['Thermal_slow']:
+    #     for h in instance.TimePeriods:
+    #         v = int(value(instance.UnitOn[g, h]))
+    #         for i in range(4*(h-1)+1, 4*h+1):
+    #             df_uniton_slow_ha.at[i, g] = v
 
     # Create dispatch upper limits for commited slow-ramping (<1 hr) units at 
-    # RTUC time scale, need to figure out a faster way, maybe combined with at 
-    # the ED scale
-    df_DispatchLimits_slow = MyDataFrame(index=df_uniton_ha.index)
-    for g in df_uniton_ha.columns:
-        r = value(instance.NominalRampDownLimit[g])/nI_ha
-        rsd = value(instance.ShutdownRampLimit[g])
-        pmax = value(instance.MaximumPowerOutput[g])
-        for m in reversed(df_DispatchLimits_slow.index):
-            tH = df_timesequence.loc[df_timesequence['tQ'] == m, 'tH'].tolist()[0]
-            v = int(round(value(instance.UnitOn[ g, tH])))
-            if m == df_DispatchLimits_slow.index[-1]:
-                df_DispatchLimits_slow.loc[m, g] = v*pmax
-            else:
-                tH_next = df_timesequence.loc[df_timesequence['tQ'] == m+1, 'tH'].tolist()[0]
-                v_next = int(round(value(instance.UnitOn[g, tH_next])))
-                df_DispatchLimits_slow.loc[m, g] = min(
-                    v*((v-v_next)*rsd) + v_next*(df_DispatchLimits_slow.loc[m+1, g]+r), 
-                    pmax
-                )
+    # RTUC time scale
+    df_DispatchLimits_slow_ha = return_dispatchupperlimits_from_uniton(
+        df_uniton_slow_ha,
+        network.df_gen.loc[network.dict_gens['Thermal_slow'], 'PMAX'].values,
+        network.df_gen.loc[network.dict_gens['Thermal_slow'], 'RAMP_10'].values/nI_ha,
+        network.df_gen.loc[network.dict_gens['Thermal_slow'], 'SHUTDOWN_RAMP'].values,
+    )
 
-    # Create dispatch upper limits for commited slow-ramping (<1 hr) units at
-    # the RTED time scale, need to figure out a faster way
-    df_DispatchLimits_slow_ED = MyDataFrame(index=df_timesequence['t5'])
-    for g in df_uniton_ha.columns:
-        r = value(instance.NominalRampDownLimit[g])/nI_ed
-        rsd = value(instance.ShutdownRampLimit[g])
-        pmax = value(instance.MaximumPowerOutput[g])
-        for m in reversed(df_DispatchLimits_slow_ED.index):
-            tH = df_timesequence.loc[df_timesequence['t5'] == m, 'tH'].tolist()[0]
-            v = int(round(value(instance.UnitOn[ g, tH])))
-            if m == df_DispatchLimits_slow_ED.index[-1]:
-                df_DispatchLimits_slow_ED.loc[m, g] = v*pmax
-            else:
-                tH_next = df_timesequence.loc[df_timesequence['t5'] == m+1, 'tH'].tolist()[0]
-                v_next = int(round(value(instance.UnitOn[g, tH_next])))
-                df_DispatchLimits_slow_ED.loc[m, g] = min(
-                    v*((v-v_next)*rsd) + v_next*(df_DispatchLimits_slow_ED.loc[m+1, g]+r), 
-                    pmax
-                )
+    # # Obtain commitment statuses of slow-starting units at RTUC time scale from 
+    # # DAUC model results
+    # df_uniton_slow_ed = MyDataFrame(
+    #     data=df_uniton_slow_ha.values.repeat(nI_ed/nI_ha, axis=0),
+    #     index=df_genfor_ed.index,
+    #     columns=df_uniton_slow_ha.columns,
+    # )
+
+    # # Create dispatch upper limits for commited slow-ramping (<1 hr) units at
+    # # the RTED time scale
+    # df_DispatchLimits_slow_ed = return_dispatchupperlimits_from_uniton(
+    #     df_uniton_slow_ed,
+    #     network.df_gen.loc[network.dict_gens['Thermal_slow'], 'PMAX'].values,
+    #     network.df_gen.loc[network.dict_gens['Thermal_slow'], 'RAMP_10'].values/nI_ed,
+    #     network.df_gen.loc[network.dict_gens['Thermal_slow'], 'SHUTDOWN_RAMP'].values,
+    # )
+
+    # IP()
+    # # Create dispatch upper limits for commited slow-ramping (<1 hr) units at 
+    # # RTUC time scale, need to figure out a faster way, maybe combined with at 
+    # # the ED scale
+    # df_DispatchLimits_slow_ha = MyDataFrame(index=df_uniton_slow_ha.index)
+    # for g in df_uniton_slow_ha.columns:
+    #     r = value(instance.NominalRampDownLimit[g])/nI_ha
+    #     rsd = value(instance.ShutdownRampLimit[g])
+    #     pmax = value(instance.MaximumPowerOutput[g])
+    #     for m in reversed(df_DispatchLimits_slow_ha.index):
+    #         tH = df_timesequence.loc[df_timesequence['tQ'] == m, 'tH'].tolist()[0]
+    #         v = int(round(value(instance.UnitOn[ g, tH])))
+    #         if m == df_DispatchLimits_slow_ha.index[-1]:
+    #             df_DispatchLimits_slow_ha.loc[m, g] = v*pmax
+    #         else:
+    #             tH_next = df_timesequence.loc[df_timesequence['tQ'] == m+1, 'tH'].tolist()[0]
+    #             v_next = int(round(value(instance.UnitOn[g, tH_next])))
+    #             df_DispatchLimits_slow_ha.loc[m, g] = min(
+    #                 v*((v-v_next)*rsd) + v_next*(df_DispatchLimits_slow_ha.loc[m+1, g]+r), 
+    #                 pmax
+    #             )
+
+    # # Create dispatch upper limits for commited slow-ramping (<1 hr) units at
+    # # the RTED time scale, need to figure out a faster way
+    # df_DispatchLimits_slow_ed = MyDataFrame(index=df_timesequence['t5'])
+    # for g in df_uniton_slow_ha.columns:
+    #     r = value(instance.NominalRampDownLimit[g])/nI_ed
+    #     rsd = value(instance.ShutdownRampLimit[g])
+    #     pmax = value(instance.MaximumPowerOutput[g])
+    #     for m in reversed(df_DispatchLimits_slow_ed.index):
+    #         tH = df_timesequence.loc[df_timesequence['t5'] == m, 'tH'].tolist()[0]
+    #         v = int(round(value(instance.UnitOn[ g, tH])))
+    #         if m == df_DispatchLimits_slow_ed.index[-1]:
+    #             df_DispatchLimits_slow_ed.loc[m, g] = v*pmax
+    #         else:
+    #             tH_next = df_timesequence.loc[df_timesequence['t5'] == m+1, 'tH'].tolist()[0]
+    #             v_next = int(round(value(instance.UnitOn[g, tH_next])))
+    #             df_DispatchLimits_slow_ed.loc[m, g] = min(
+    #                 v*((v-v_next)*rsd) + v_next*(df_DispatchLimits_slow_ed.loc[m+1, g]+r), 
+    #                 pmax
+    #             )
 
     # RTUC and RTED initial parameters
     dict_UnitOnT0State       = None
@@ -985,11 +1070,11 @@ if __name__ == "__main__":
     #     t_end   = 4*i_rtuc
 
         dict_uniton_ha = MyDataFrame(
-            df_uniton_ha.loc[t_start: t_end, :].T
+            df_uniton_slow_ha.loc[t_start: t_end, :].T
         ).to_dict_2d()
 
-        dict_DispacthLimitsUpper = MyDataFrame(
-            df_DispatchLimits_slow.loc[t_start: t_end, :].T
+        dict_DispacthLimitsUpper_slow = MyDataFrame(
+            df_DispatchLimits_slow_ha.loc[t_start: t_end, :].T
         ).to_dict_2d()
 
         # Create RTUC model
@@ -1003,7 +1088,7 @@ if __name__ == "__main__":
             dict_UnitOnT0State, 
             dict_PowerGeneratedT0,
             dict_uniton_ha,
-            dict_DispacthLimitsUpper
+            dict_DispacthLimitsUpper_slow
         )
         msg = "RTUC Model {} created!".format(i_rtuc)
         print msg
@@ -1061,33 +1146,70 @@ if __name__ == "__main__":
         # List of time intervals in the ED run
         ls_t_ed = df_timesequence.loc[df_timesequence['tQ']==t_start, 't5'].tolist()
 
-        # Create dispatch upper limits for ALL commited units
-        df_DispatchLimits = MyDataFrame(
-            index=[
-                df_timesequence.loc[i, 't5']
-                for i in df_timesequence.index
-                if df_timesequence.loc[i, 'tQ'] in range(t_start, t_end+1)
-            ]
-        ) # Include all ED intervals in the current RTUC run
-        for g in ins_ha.ThermalGenerators:
-            if g in df_DispatchLimits_slow_ED.columns: # Slow units, read directly from the previous results
-                df_DispatchLimits[g] = df_DispatchLimits_slow_ED.loc[df_DispatchLimits.index, g]
-            else: # Fast units, we need to calculate, how to save time on this one?
-                r = value(instance.NominalRampDownLimit[g])/nI_ed
-                rsd = value(instance.ShutdownRampLimit[g])
-                pmax = value(instance.MaximumPowerOutput[g])
-                for m in reversed(df_DispatchLimits.index):
-                    tQ = df_timesequence.loc[df_timesequence['t5'] == m, 'tQ'].tolist()[0]
-                    v = int(round(value(ins_ha.UnitOn[g, tQ])))
-                    if m == df_DispatchLimits.index[-1]:
-                        df_DispatchLimits.loc[m, g] = v*pmax
-                    else:
-                        tQ_next = df_timesequence.loc[df_timesequence['t5'] == m+1, 'tQ'].tolist()[0]
-                        v_next = int(round(value(ins_ha.UnitOn[g, tQ_next])))
-                        df_DispatchLimits.loc[m, g] = min(
-                            v*((v-v_next)*rsd) + v_next*(df_DispatchLimits.loc[m+1, g]+r), 
-                            pmax
-                        )
+        # IP()
+        # Gather unit commitment statuses from the RTUC model
+        df_uniton_fast_ha = pd.DataFrame(
+            index=ins_ha.TimePeriods.value,
+            columns=network.dict_gens['Thermal_fast'],
+        )
+        for g in network.dict_gens['Thermal_fast']:
+            for t in ins_ha.TimePeriods.value:
+                df_uniton_fast_ha.at[t, g] = value(ins_ha.UnitOn[g, t])
+        df_uniton_all_ha = pd.concat(
+            [
+                df_uniton_slow_ha.loc[ins_ha.TimePeriods.value, :],
+                df_uniton_fast_ha,
+            ],
+            axis=1,
+        )
+
+        # Conver the RTUC unit commitment statuses into the RTED time scale
+        df_uniton_all_ed = pd.DataFrame(
+            data=df_uniton_all_ha.values.repeat(nI_ed/nI_ha, axis=0),
+            index=np.concatenate(
+                [
+                    np.arange(nI_ed/nI_ha*(i-1)+1, nI_ed/nI_ha*i+1) 
+                    for i in df_uniton_all_ha.index
+                ]
+            ),
+            columns=df_uniton_all_ha.columns,
+        )
+
+        # Gather upper dispatch limits for the RTED model
+        df_DispatchLimits_ed = return_dispatchupperlimits_from_uniton(
+            df_uniton_all_ed[network.dict_gens['Thermal']],
+            network.df_gen.loc[network.dict_gens['Thermal'], 'PMAX'].values,
+            network.df_gen.loc[network.dict_gens['Thermal'], 'RAMP_10'].values/nI_ed,
+            network.df_gen.loc[network.dict_gens['Thermal'], 'SHUTDOWN_RAMP'].values,
+        )
+
+        # # Create dispatch upper limits for ALL commited units
+        # df_DispatchLimits_ed = MyDataFrame(
+        #     index=[
+        #         df_timesequence.loc[i, 't5']
+        #         for i in df_timesequence.index
+        #         if df_timesequence.loc[i, 'tQ'] in range(t_start, t_end+1)
+        #     ]
+        # ) # Include all ED intervals in the current RTUC run
+        # for g in ins_ha.ThermalGenerators:
+        #     if g in df_DispatchLimits_slow_ed.columns: # Slow units, read directly from the previous results
+        #         df_DispatchLimits_ed[g] = df_DispatchLimits_slow_ed.loc[df_DispatchLimits_ed.index, g]
+        #     else: # Fast units, we need to calculate, how to save time on this one?
+        #         r = value(instance.NominalRampDownLimit[g])/nI_ed
+        #         rsd = value(instance.ShutdownRampLimit[g])
+        #         pmax = value(instance.MaximumPowerOutput[g])
+        #         for m in reversed(df_DispatchLimits_ed.index):
+        #             tQ = df_timesequence.loc[df_timesequence['t5'] == m, 'tQ'].tolist()[0]
+        #             v = int(round(value(ins_ha.UnitOn[g, tQ])))
+        #             if m == df_DispatchLimits_ed.index[-1]:
+        #                 df_DispatchLimits_ed.loc[m, g] = v*pmax
+        #             else:
+        #                 tQ_next = df_timesequence.loc[df_timesequence['t5'] == m+1, 'tQ'].tolist()[0]
+        #                 v_next = int(round(value(ins_ha.UnitOn[g, tQ_next])))
+        #                 df_DispatchLimits_ed.loc[m, g] = min(
+        #                     v*((v-v_next)*rsd) + v_next*(df_DispatchLimits_ed.loc[m+1, g]+r), 
+        #                     pmax
+        #                 )
 
         for t_start_ed in ls_t_ed:
             t_end_ed = t_start_ed + 5 # Total 6 ED intervals, 1 binding interval, 5 look-ahead interval, 30 min in total
@@ -1102,7 +1224,7 @@ if __name__ == "__main__":
                     dict_uniton_ed[g, t5] = int(round(v))
             
             dict_DispatchLimitsUpper_ed = MyDataFrame(
-                df_DispatchLimits.loc[t_start_ed: t_end_ed, :].T
+                df_DispatchLimits_ed.loc[t_start_ed: t_end_ed, :].T
             ).to_dict_2d()
 
             # Create ED model

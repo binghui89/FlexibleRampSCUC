@@ -784,6 +784,16 @@ def build_sced_model(
         )
     model.ComputeTotalCurtailmentCost = Constraint(rule=compute_total_curtailment_cost_rule)
 
+    def compute_total_reserve_shortage_cost_rule(m):
+        return m.TotalReserveShortageCost == sum(
+            m.SpinningReserveUpShortage[t] * 2000
+            + m.RegulatingReserveUpShortage[t] * 5500
+            + m.RegulatingReserveDnShortage[t] * 5500
+            for t in m.TimePeriods
+        )
+    model.ComputeTotalReserveShortageCost = Constraint(rule=compute_total_reserve_shortage_cost_rule)
+
+
     def SlackPenalty_rule(m):
         return 10000000*sum(
         m.OverCommit[t] + 
@@ -806,7 +816,7 @@ def build_sced_model(
     #
    
     def total_cost_objective_rule(m):
-        return m.TotalProductionCost + m.TotalCurtailmentCost + m.SlackPenalty
+        return m.TotalProductionCost + m.TotalCurtailmentCost + m.TotalReserveShortageCost + m.SlackPenalty
     model.TotalCostObjective = Objective(rule=total_cost_objective_rule, sense=minimize)
 
     #############################################
