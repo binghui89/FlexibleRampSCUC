@@ -951,8 +951,8 @@ if __name__ == "__main__":
             dict_PowerGeneratedT0_ed = df_AGC_SCHEDULE.loc[t_AGC, network.dict_gens['Thermal']].to_dict()
 
             # This is for debugging
-            if t_start_ed == 101:
-                IP()
+            # if t_start_ed == 101:
+            #     IP()
 
         # Extract initial parameters from the binding interval of the last ED run for the next RTUC run
         dict_UnitOnT0State = return_unitont0state(ins_ha, ins_ha.TimePeriods.first())
