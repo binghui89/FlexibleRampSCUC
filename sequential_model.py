@@ -845,6 +845,13 @@ if __name__ == "__main__":
                     ],
                     axis=1
                 ).min(axis=1) + df_agc_tmp.loc[:, 'ACTUAL_GENERATION']
+
+                # Finally, let's set the actual generation of all down units to zero
+                df_agc_tmp.loc[
+                    df_uniton_all_ed.loc[t_start_ed, abs(df_uniton_all_ed.loc[t_start_ed, :])<1E-3].index, 
+                    'AGC_BASEPOINT'
+                ] = 0
+
                 df_AGC_SCHEDULE.loc[t_AGC, :] = df_agc_tmp.loc[:, 'AGC_BASEPOINT']
                 df_AGC_MOVE.loc[t_AGC, :]     = df_agc_tmp.loc[:, 'AGC_MOVE']
                 df_ACE_TARGET.loc[t_AGC, :]   = df_agc_tmp.loc[:, 'ACE_TARGET']
@@ -938,6 +945,10 @@ if __name__ == "__main__":
                 # ).min(axis=1)
                 # df_AGC_SCHEDULE.loc[t_AGC, :] = df_agc_tmp.loc[:, 'AGC_BASEPOINT']
 
+                # This is for debugging
+                # if t_start_agc >= 501:
+                #     IP()
+
             # End of the AGC loop
             ####################################################################
 
@@ -950,9 +961,6 @@ if __name__ == "__main__":
             # )
             dict_PowerGeneratedT0_ed = df_AGC_SCHEDULE.loc[t_AGC, network.dict_gens['Thermal']].to_dict()
 
-            # This is for debugging
-            # if t_start_ed == 101:
-            #     IP()
 
         # Extract initial parameters from the binding interval of the last ED run for the next RTUC run
         dict_UnitOnT0State = return_unitont0state(ins_ha, ins_ha.TimePeriods.first())
