@@ -4,6 +4,7 @@ from pyomo.environ import *
 from pyomo.opt import SolverFactory
 from pandas import DataFrame
 from time import time
+from matplotlib import pyplot as plt
 from IPython import embed as IP
 
 class MyDataFrame(DataFrame):
@@ -138,15 +139,16 @@ class Network(object):
 def sigma_up_rule(m, g, t):
     t1 = m.TimePeriods.first()
     te = m.TimePeriods.last()
-    STT  = value(m.StartupTime[g])
-    TU0 = value(m.InitialTimePeriodsOnLine[g])
-    if t >= STT + (t1-1):
+    Tsu = value(m.StartupTime[g])
+    TU0 = value(m.UnitOnT0State[g])
+    if t >= t1 + (Tsu - 1):
         return sum(
             m.UnitStartUp[g, t - i + 1]
-            for i in range(1, STT + 1 )
+            for i in range(1, Tsu + 1 )
         )
-    elif (m.UnitOnT0 == 1) and (TU0 < STT ) and (t <= t1-1 + STT - TU0 - 1):
-        # Unit is starting up, and (t1-1 + STT - TU0 - 1) is the last starting up period
+    elif (value(m.UnitOnT0[g]) == 1) and (TU0 < Tsu ) and (t <= t1 + Tsu - TU0 - 1):
+        # Unit is starting up, and (t1 + Tsu - TU0 - 1) is the last starting up period
+        # print g, t
         return 1
     else:
         return sum(
@@ -157,56 +159,59 @@ def sigma_up_rule(m, g, t):
 def sigma_dn_rule(m, g, t):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
-    SDT = value(m.ShutdownTime[g])
-    if t <= te - SDT:
+    Tsd = value(m.ShutdownTime[g])
+    if t <= te - Tsd:
         return sum(
             m.UnitShutDn[g, t + i]
-            for i in range(1, SDT + 1 )
+            for i in range(1, Tsd + 1 )
         )
     elif t < te:
         return sum(
             m.UnitShutDn[g, t + i]
             for i in range(1, te - t + 1 )
         )
-    else: # The last period
+    else:
+        # The last period, we don't know what's the value of the shut-down 
+        # indicator of the next interval, so it's always 0.
         return 0
 
 def sigma_power_times_up_rule(m, g, t):
     t1 = m.TimePeriods.first()
     te = m.TimePeriods.last()
-    STT  = value(m.StartupTime[g])
-    TU0 = value(m.InitialTimePeriodsOnLine[g])
+    Tsu = value(m.StartupTime[g])
+    TU0 = value(m.UnitOnT0State[g])
     Pmin = value(m.MinimumPowerOutput[g])
-    if t >= STT + (t1-1):
+    if t >= t1 + (Tsu - 1):
         return sum(
-            m.UnitStartUp[g, t - i + 1]*float(i)/STT*Pmin
-            for i in range(1, STT + 1 )
+            m.UnitStartUp[g, t - i + 1]*float(i)/Tsu*Pmin
+            for i in range(1, Tsu + 1 )
         )
-    elif (m.UnitOnT0 == 1) and (TU0 < STT ) and (t <= t1-1 + STT - TU0 - 1):
-        # Unit is starting up, and (t1-1 + STT - TU0 - 1) is the last starting up period
-        return float(t-t1+1+TU0)/STT*Pmin # t-t1+1+TU0 indicates which start-up period
+    elif (value(m.UnitOnT0[g]) == 1) and (TU0 < Tsu ) and (t <= t1 + Tsu - TU0 - 1):
+        # Unit is starting up, and (t1 + STT - TU0 - 1) is the last starting up period
+        # print g, t, float(t-t1+1+TU0)/Tsu*Pmin
+        return float(t-t1+1+TU0)/Tsu*Pmin # t-t1+1+TU0 indicates which start-up period
     else:
         return sum(
-            m.UnitStartUp[g, t - i + 1]*float(i)/STT*Pmin
+            m.UnitStartUp[g, t - i + 1]*float(i)/Tsu*Pmin
             for i in range(1, (t-t1+1) + 1 ) # t-t1+1 is the number of intervals from t1 to t
         )
 
 def sigma_power_times_dn_rule(m, g, t):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
-    SDT = value(m.ShutdownTime[g])
+    Tsd = value(m.ShutdownTime[g])
     Pmin = value(m.MinimumPowerOutput[g])
-    if t <= te - SDT:
-        # float(SDT-i+1)/SDT*Pmin is the power level at the end of the ith 
+    if t <= te - Tsd:
+        # float(Tsd-i+1)/Tsd*Pmin is the power level at the end of the ith 
         # shutting-down interval
         return sum(
-            m.UnitShutDn[g, t + SDT - i + 1]*float(SDT-i+1)/SDT*Pmin
-            for i in range(1, SDT + 1)
+            m.UnitShutDn[g, t + Tsd - i + 1]*float(Tsd-i+1)/Tsd*Pmin
+            for i in range(1, Tsd + 1)
         )
     elif t < te:
         return sum(
-            m.UnitShutDn[g, t + SDT - i + 1]*float(SDT-i+1)/SDT*Pmin
-            for i in range(t+SDT+1-te, SDT + 1)
+            m.UnitShutDn[g, t + Tsd - i + 1]*float(Tsd-i+1)/Tsd*Pmin
+            for i in range(t+Tsd+1-te, Tsd + 1)
         )
     else: # The last period
         return 0
@@ -289,12 +294,12 @@ def init_set_fix_shutdown(m):
         Pmin = value(m.MinimumPowerOutput[g])
         Tsu  = value(m.StartupTime[g])
         Tsd  = value(m.ShutdownTime[g])
-        Tu0  = value(m.InitialTimePeriodsOnLine[g])
+        Tu0  = value(m.UnitOnT0State[g])
         if (v0==1) and (P0 < Pmin) and (Tu0 > Tsu):
             # Which shut-down interval am I in?
             i = int(round(Tsd - P0/Pmin*Tsd + 1)) 
             t_fixed = m.TimePeriods.first() + Tsd - i
-            set_gen_time.add(g, t_fixed)
+            set_gen_time.add((g, t_fixed))
     return set_gen_time
 
 def thermal_gen_output_limits_startup_lower_rule(m, g, t):
@@ -361,6 +366,7 @@ def thermal_gen_indicator_overlap_rule(m, g, t):
         return Constraint.Skip
 
 def thermal_gen_indicator_shutdown_fixed_rule(m, g, t):
+    print 'shut-down fixed:', g, t
     return m.UnitShutDn[g, t] == 1
 
 def enforce_generator_output_limits_rule_part_a(m, g, t):
@@ -377,7 +383,7 @@ def enforce_generator_output_limits_rule_part_c(m, g, t):
 
 # Maximum available power of non-thermal units less than forecast
 def enforce_renewable_generator_output_limits_rule(m, g, t):
-    return  m.MaximumPowerAvailable[g, t]<= m.PowerForecast[g,t]
+    return  m.MaximumPowerAvailable[g, t] <= m.PowerForecast[g,t]
 
 # Power generation of thermal units by block
 def enforce_generator_block_output_rule(m, g, t):
@@ -804,7 +810,6 @@ def create_model(
     """SETS & PARAMETERS"""
     ##########################################################
     # The number of time periods under consideration, in addition to the corresponding set.
-    # model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(load_df.index))
     model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(df_busload.index))
     model.TimePeriods    = Set(initialize=df_busload.index, ordered=True) # Time periods must be an ordered set of continuous integers
 
@@ -929,7 +934,8 @@ def create_model(
     #     within=NonNegativeReals, initialize=genforren_dict, mutable=True
     # )
     model.PowerForecast = Param(
-        model.NonThermalGenerators, model.TimePeriods,
+        model.NonThermalGenerators, 
+        model.TimePeriods,
         within=NonNegativeReals,
         initialize=MyDataFrame(df_genfor_nonthermal.T).to_dict_2d(),
         mutable=True
@@ -937,13 +943,11 @@ def create_model(
 
     model.MinimumPowerOutput = Param(
         model.ThermalGenerators,
-        # within=NonNegativeReals, initialize=genth_df['PMIN'].to_dict()
         within=NonNegativeReals,
         initialize=network.df_gen.loc[i_thermal, 'PMIN'].to_dict()
     )
     model.MaximumPowerOutput = Param(
         model.ThermalGenerators,
-        # within=NonNegativeReals, initialize=genth_df['PMAX'].to_dict(),
         within=NonNegativeReals, 
         initialize=network.df_gen.loc[i_thermal, 'PMAX'].to_dict(),
         validate=maximum_power_output_validator
@@ -1066,7 +1070,8 @@ def create_model(
     )
 
     # Shutdown and startup cost for each generator, in the literature, these are 
-    # often set to 0.
+    # often set to 0. However, in order to enforce the start-up and shut-down 
+    # profiles, these costs cannot be zero here.
     model.ShutdownCostCoefficient = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
@@ -1247,20 +1252,6 @@ def create_model(
     # model.SlackRamp2_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
     # model.SlackRamp3_neg  = Var(model.ThermalGenerators, model.TimePeriods, initialize=0.0, within=NonNegativeReals)
 
-    """CONSTRAINTS"""
-    ############################################
-    # supply-demand constraints                #
-    ############################################
-    model.SlackPenalty = Expression(
-        rule = SlackPenalty_rule
-    )
-    model.DefineHourlyCurtailment = Constraint(
-        model.TimePeriods, rule=definition_hourly_curtailment_rule
-    )
-    model.ProductionEqualsDemand = Constraint(
-        model.TimePeriods, rule=production_equals_demand_rule
-    )
-
     ############################################
     # Define assisting variable, should we use 
     # actual variable instead of expression?
@@ -1287,6 +1278,20 @@ def create_model(
         rule=sigma_power_times_dn_rule,
     )
 
+    """CONSTRAINTS"""
+    ############################################
+    # supply-demand constraints                #
+    ############################################
+    model.SlackPenalty = Expression(
+        rule = SlackPenalty_rule
+    )
+    model.DefineHourlyCurtailment = Constraint(
+        model.TimePeriods, rule=definition_hourly_curtailment_rule
+    )
+    model.ProductionEqualsDemand = Constraint(
+        model.TimePeriods, rule=production_equals_demand_rule
+    )
+
     ############################################
     # generation limit constraints #
     ############################################
@@ -1311,8 +1316,9 @@ def create_model(
     )
 
     model.EnforceRenewableOutputLimits = Constraint(
-        model.NonThermalGenerators, model.TimePeriods, 
-        rule=enforce_renewable_generator_output_limits_rule
+        model.NonThermalGenerators,
+        model.TimePeriods, 
+        rule=enforce_renewable_generator_output_limits_rule,
     )
 
     model.thermal_gen_output_limits_startup_lower = Constraint(
@@ -1388,7 +1394,7 @@ def create_model(
     )
 
     # Sets that the shutdown indicators are fixed
-    model.set_fix_shutdown = Set( initialize=init_set_fix_shutdown )
+    model.set_fix_shutdown = Set( dimen=2, initialize=init_set_fix_shutdown )
 
     model.thermal_gen_indicator_shutdown_fixed = Constraint(
         model.set_fix_shutdown,
@@ -1574,6 +1580,7 @@ if __name__ == "__main__":
     df_timesequence = df_timesequence.astype('int')
 
     # TX 2000 bus system
+    # casename = 'TX'
     # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
     # csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
     # csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
@@ -1589,6 +1596,7 @@ if __name__ == "__main__":
     # csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_generator.csv'
 
     # 118 bus system
+    casename = '118'
     csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
     csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
     csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
@@ -1612,9 +1620,21 @@ if __name__ == "__main__":
     network.df_bus['VOLL'] = 9000
     network.baseMVA = 100
 
-    # This is to fix a bug in the 118 bus system
+    # This is for the Texas system
+    if casename=='TX':
+        network.enforce_kv_level(230)
+
+    # This is for 118 bus system
+    # # This is to fix a bug in the 118 bus system
     if 'Hydro 31' in network.df_gen.index:
         network.df_gen.drop('Hydro 31', inplace=True)
+    # Geo 01 is a thermal gen, set startup and shutdown costs to non-zero to 
+    # force UnitStartUp and UnitShutDn being intergers.
+    if 'Geo 01' in network.df_gen.index:
+        network.df_gen.at['Geo 01', 'STARTUP']  = 50
+        network.df_gen.at['Geo 01', 'SHUTDOWN'] = 50
+        # network.df_margcost.at['Geo 01', 'nlcost'] = 10
+        # network.df_margcost.at['Geo 01', '1']      = 10
 
     # Add start-up and shut-down time in a quick and dirty way
     network.df_gen.loc[:, 'STARTUP_TIME']  = network.df_gen.loc[:, 'MINIMUM_UP_TIME']
@@ -1655,7 +1675,6 @@ if __name__ == "__main__":
     network.df_gen['AGC_MODE'] = 'RAW' # Possible options: NA, RAW, SMOOTH, CPS2
     network.df_gen['DEAD_BAND'] = 5 # MW, 5 MW from FESTIV
 
-
     # Prepare day-ahead UC data
     df_busload = pd.read_csv(csv_busload, index_col=0)
     df_genfor  = pd.read_csv(csv_genfor, index_col=0)
@@ -1681,21 +1700,6 @@ if __name__ == "__main__":
     df_genfor_ed  = df_genfor_ed.loc[:, network.df_gen[network.df_gen['GEN_TYPE']!='Thermal'].index]
     df_genfor_ed.fillna(0, inplace=True)
 
-    # Prepare AGC data
-    df_busload_agc = pd.read_csv(csv_busload_agc, index_col='Slot')
-    df_genfor_agc  = pd.read_csv(csv_genfor_agc, index_col='Slot')
-    if 'LOAD' in df_busload_agc.columns.difference(['LOAD']):
-        df_busload_agc = df_busload_agc.loc[:, df_busload_agc.columns.difference(['LOAD'])]
-    df_busload_agc = MyDataFrame(df_busload_agc.loc[:, df_busload_agc.columns.difference(['LOAD'])])
-    df_busload_agc.fillna(0, inplace=True)
-    df_busload_full_agc = pd.DataFrame(0, index=df_busload_agc.index, columns=network.ls_bus) # For ACE calculation, include all buses
-    df_busload_full_agc.loc[:, df_busload_agc.columns] = df_busload_agc
-    df_genfor_agc  = MyDataFrame(df_genfor_agc)
-    df_genfor_agc.fillna(0, inplace=True)
-    df_agc_param = pd.DataFrame(0, index=network.df_gen.index, columns=['ACE_TARGET'])
-    df_agc_param.loc[:, 'DEAD_BAND'] = network.df_gen.loc[:, 'DEAD_BAND']
-    df_agc_param.loc[:, 'AGC_MODE']  = network.df_gen.loc[:, 'AGC_MODE']
-
     # Result container
 
     # RTUC results
@@ -1709,29 +1713,25 @@ if __name__ == "__main__":
     df_REGDN_RTED_BINDING = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
     df_SPNUP_RTED_BINDING = MyDataFrame(index=df_genfor_ed.index, columns=network.df_gen.index)
 
-    # AGC results
-    df_ACTUAL_GENERATION = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
-    df_AGC_SCHEDULE      = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
-    df_ACE_TARGET        = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
-    df_AGC_MOVE          = MyDataFrame(index=df_genfor_agc.index, columns=network.df_gen.index)
-    df_ACE               = MyDataFrame(index=df_genfor_agc.index)
-    dict_ACE = {
-        'Slot': list(), # Consider using Numpy array? How's the time performance?
-        'RAW':  list(),
-        'CPS2': list(),
-        'SACE': list(),
-        'ABS':  list(),
-        'INT':  list(),
-    }
 
     # Reserve margins, will be move to case specific data
     ReserveFactor = 0.1
     RegulatingReserveFactor = 0.05
-    # Parameters for AGC, will be moved to case specific data
-    CPS2_interval_minute = 10 # minutes
-    K1, K2 = 0.5, 0.5
-    Type3_integral = 180 # s, Number of seconds integrated over in smoothed ACE mode
-    L10 = 50 # MW
+
+    dict_UnitOnT0State = dict()
+    dict_PowerGeneratedT0 = dict()
+    for g in network.dict_gens['Thermal']:
+        dict_UnitOnT0State[g]    = 12
+        dict_PowerGeneratedT0[g] = value(network.df_gen.at[g, 'PMAX'])
+
+    # Test purpose
+    # Start=up test, change the print in the sigma_up rule
+    dict_PowerGeneratedT0['CC NG 35'] = 298.29/8*4
+    dict_UnitOnT0State['CC NG 35'] = 4
+
+    # Shut-down test, change the print in the fix indicator rule
+    dict_PowerGeneratedT0['CC NG 16'] = 503.86/8*3
+    dict_UnitOnT0State['CC NG 16'] = 12
 
     ############################################################################
     # Start DAUC
@@ -1742,6 +1742,8 @@ if __name__ == "__main__":
         ReserveFactor,
         RegulatingReserveFactor,
         nI=1,
+        dict_UnitOnT0State=dict_UnitOnT0State,
+        dict_PowerGeneratedT0=dict_PowerGeneratedT0,
     )
     msg = 'Model created at: {:>.2f} s'.format(time() - t0)
     print(msg)
@@ -1750,7 +1752,7 @@ if __name__ == "__main__":
 
     instance = model
     optimizer = SolverFactory('cplex')
-    results = optimizer.solve(instance)
+    results = optimizer.solve(instance, options={"mipgap":0.001})
     instance.solutions.load_from(results)
     msg = 'Model solved at: {:>.2f} s, objective: {:>.2f}'.format(
             time() - t0,
@@ -1761,7 +1763,6 @@ if __name__ == "__main__":
     content += '\n'
     # End of DAUC
     ############################################################################
-    IP()
 
     set_gens = set()
     for k in instance.UnitStartUp:
@@ -1769,9 +1770,65 @@ if __name__ == "__main__":
             print k, value(instance.UnitStartUp[k]), value(instance.UnitShutDn[k])
             set_gens.add(k[0])
 
-    df_gen    = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=set_gens)
-    df_uniton = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=set_gens)
-    for g in set_gens:
+    df_gen    = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.AllGenerators)
+    df_uniton = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
+    df_regup  = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
+    df_regdn  = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
+    for g in instance.AllGenerators:
         for t in instance.TimePeriods:
             df_gen.at[t, g] = value(instance.PowerGenerated[g, t])
-            df_uniton.at[t, g] = value(instance.UnitOn[g, t])
+            if g in instance.ThermalGenerators:
+                df_uniton.at[t, g] = value(instance.UnitOn[g, t])
+                df_regup.at[t, g]  = value(instance.RegulatingReserveUpAvailable[g, t])
+                df_regdn.at[t, g]  = value(instance.RegulatingReserveDnAvailable[g, t])
+
+    ls_dict_therm  = list()
+    for g in instance.ThermalGenerators:
+        for a in ['PowerGenerated', 'UnitOn', 'UnitStartUp', 'UnitShutDn', 'SigmaUp', 'SigmaDn', 'SigmaPowerTimesUp', 'SigmaPowerTimesDn']:
+            attr = getattr(instance, a)
+            dict_row = {'Gen': g, 'Var': a}
+            for t in instance.TimePeriods:
+                dict_row[t] = value(attr[g, t])
+            ls_dict_therm.append(dict_row)
+    df_therm = pd.DataFrame(ls_dict_therm, columns=['Gen', 'Var']+list(instance.TimePeriods.value))
+
+    ax1 = plt.subplot(1, 1, 1)
+    ax2 = ax1.twinx()
+    ax1.step(
+        df_gen.index,
+        df_gen.values.sum(axis=1),
+        where='post',
+        color='b',
+        label='Generation'
+    )
+    ax1.step(
+        df_busload.index,
+        df_busload.values.sum(axis=1),
+        where='post',
+        color='k',
+        label='Total load'
+    )
+    ax1.step(
+        df_gen.index,
+        df_gen.values.sum(axis=1)-df_regdn.values.sum(axis=1),
+        where='post',
+        color='b',
+        label='REGDN'
+    )
+    ax1.step(
+        df_gen.index,
+        df_gen.values.sum(axis=1)+df_regup.values.sum(axis=1),
+        where='post',
+        color='b',
+        label='REGUP'
+    )
+    ax2.step(
+        df_uniton.index,
+        df_uniton.values.sum(axis=1),
+        where='post',
+        color='r',
+        label='Committed units'
+    )
+    plt.legend()
+    plt.show()
+    IP()
