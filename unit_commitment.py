@@ -217,6 +217,32 @@ def sigma_power_times_dn_rule(m, g, t):
     else: # The last period
         return 0
 
+def sigma_dn_initial_rule(m, g):
+    t1  = m.TimePeriods.first()
+    t0  = t1 - 1 # So t1 must be no less than 1
+    Tsd = value(m.ShutdownTime[g])
+    return sum(
+        m.UnitShutDn[g, t0 + i]
+        for i in range(1, Tsd + 1)
+    )
+
+def sigma_power_times_dn_initial_rule(m, g):
+    t1  = m.TimePeriods.first()
+    t0  = t1 - 1 # So t1 must be no less than 1
+    Tsd = value(m.ShutdownTime[g])
+    Pmin = value(m.MinimumPowerOutput[g])
+    return sum(
+        m.UnitShutDn[g, t0 + Tsd - i + 1]*float(Tsd-i+1)/Tsd*Pmin
+        for i in range(1, Tsd + 1)
+    )
+
+def set_initial_shutdown_power_limits_rule(m):
+    set_gen = set()
+    for g in m.ThermalGenerators:
+        if value(m.UnitOnT0State[g]) >= value(m.ShutdownTime[g]):
+            set_gen.add(g)
+    return set_gen
+
 # Minimum and maximum generation levels, for each thermal generator in MW.
 # could easily be specified on a per-time period basis, but are not currently.
 def maximum_power_output_validator(m, v, g):
@@ -309,6 +335,12 @@ def thermal_gen_output_limits_startup_lower_rule(m, g, t):
 def thermal_gen_output_limits_startup_upper_rule(m, g, t):
     return m.MaximumPowerAvailable[g, t] <= (m.UnitOn[g, t] - m.SigmaUp[g, t])*m.MaximumPowerOutput[g] + m.SigmaPowerTimesUp[g, t] + m.Slack_startup_upper[g, t]
 
+def thermal_gen_output_limits_shutdown_upper_initial_rule(m, g):
+    return (m.UnitOnT0[g] - m.SigmaDnT0[g])*m.MinimumPowerOutput[g] + m.SigmaPowerTimesDnT0[g] <= m.PowerGeneratedT0[g]
+
+def thermal_gen_output_limits_shutdown_lower_initial_rule(m, g):
+    return (m.UnitOnT0[g] - m.SigmaDnT0[g])*m.MaximumPowerOutput[g] + m.SigmaPowerTimesDnT0[g] >= m.PowerGeneratedT0[g]
+
 def thermal_gen_output_limits_shutdown_lower_rule(m, g, t):
     return (m.UnitOn[g, t] - m.SigmaDn[g, t] - m.SigmaUp[g, t])*m.MinimumPowerOutput[g] + m.SigmaPowerTimesDn[g, t] - m.Slack_shutdown_lower[g, t] <= m.MinimumPowerAvailable[g, t]
 
@@ -339,7 +371,7 @@ def thermal_gen_rampdn_rule(m, g, t):
     else:
         t_prev = m.TimePeriods.prev(t)
         power_last_period = m.PowerGenerated[g, t_prev]
-    # return power_last_period - m.PowerGenerated[g, t] - m.Slack_rampdn[g, t] <= (m.SigmaDn[g,t])*m.MaximumPowerOutput[g] + m.UnitShutDn[g,t]*m.MinimumPowerOutput[g]/m.ShutdownTime[g] + m.NominalRampDownLimit[g]*(m.UnitOn[g, t] - m.SigmaDn[g, t]) 
+    # return power_last_period - m.PowerGenerated[g, t] - m.Slack_rampdn[g, t] <= (m.SigmaDn[g,t])*m.MaximumPowerOutput[g] + m.NominalRampDownLimit[g]*(m.UnitOn[g, t] - m.SigmaDn[g, t]) 
     return power_last_period - m.PowerGenerated[g, t] - m.Slack_rampdn[g, t] <= (m.SigmaDn[g,t] + m.UnitShutDn[g,t])*m.MinimumPowerOutput[g]/m.ShutdownTime[g] + m.NominalRampDownLimit[g]*(m.UnitOn[g, t] - m.SigmaDn[g, t]) 
 
 def thermal_gen_startup_shutdown_rule(m, g, t):
@@ -679,6 +711,7 @@ def enforce_regulating_down_reserve_requirement_rule(m, t):
 #############################################
 
 def powerdollar_rule(m, g, t):
+    # The part of generated power that actually counts towards production costs
     return m.PowerDollar[g, t] >= m.PowerGenerated[g, t] - m.BlockSize0[g]
 
 # Production cost, per gen per time slice
@@ -1291,6 +1324,19 @@ def create_model_new(
         rule=sigma_power_times_dn_rule,
     )
 
+    model.set_initial_shutdown_power_limits = Set(
+        within=model.ThermalGenerators,
+        initialize=set_initial_shutdown_power_limits_rule,
+    )
+    model.SigmaDnT0 = Expression(
+        model.set_initial_shutdown_power_limits,
+        rule=sigma_dn_initial_rule,
+    )
+    model.SigmaPowerTimesDnT0 = Expression(
+        model.set_initial_shutdown_power_limits,
+        rule=sigma_power_times_dn_initial_rule,
+    )
+
     """CONSTRAINTS"""
     ############################################
     # supply-demand constraints                #
@@ -1327,6 +1373,16 @@ def create_model_new(
     ############################################
     # Thermal generation start-up/shut-down.
     ############################################
+
+    model.thermal_gen_output_limits_shutdown_upper_initial = Constraint(
+        model.set_initial_shutdown_power_limits,
+        rule=thermal_gen_output_limits_shutdown_upper_initial_rule,
+    )
+
+    model.thermal_gen_output_limits_shutdown_lower_initial = Constraint(
+        model.set_initial_shutdown_power_limits,
+        rule = thermal_gen_output_limits_shutdown_lower_initial_rule,
+    )
 
     model.thermal_gen_output_limits_startup_lower = Constraint(
         model.ThermalGenerators,
@@ -1403,12 +1459,12 @@ def create_model_new(
     )
 
     # Sets that the shutdown indicators are fixed
-    model.set_fix_shutdown = Set( dimen=2, initialize=init_set_fix_shutdown )
+    # model.set_fix_shutdown = Set( dimen=2, initialize=init_set_fix_shutdown )
 
-    model.thermal_gen_indicator_shutdown_fixed = Constraint(
-        model.set_fix_shutdown,
-        rule=thermal_gen_indicator_shutdown_fixed_rule,
-    )
+    # model.thermal_gen_indicator_shutdown_fixed = Constraint(
+    #     model.set_fix_shutdown,
+    #     rule=thermal_gen_indicator_shutdown_fixed_rule,
+    # )
 
     ############################################
     # generation block outputs constraints #
@@ -1817,6 +1873,12 @@ def test_new_model():
     plt.legend()
     plt.show()
     IP()
+
+    # for g in set_gens:
+    #     plt.step(df_gen.index, df_gen[g], where='post')
+    #     plt.step(df_gen.index, [value(instance.MinimumPowerOutput[g])]*24, where='post')
+    #     plt.title( g + ', Tsd = {:>g}'.format(value(instance.ShutdownTime[g])))
+    #     plt.show()
 
 def test_old_model():
     t0 = time()
