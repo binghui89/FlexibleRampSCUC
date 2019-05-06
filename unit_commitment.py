@@ -5,7 +5,6 @@ from pyomo.opt import SolverFactory
 from pandas import DataFrame
 from time import time
 from matplotlib import pyplot as plt
-from SCUC_RampConstraint_3 import create_model
 from IPython import embed as IP
 
 class MyDataFrame(DataFrame):
@@ -399,17 +398,11 @@ def thermal_gen_indicator_shutdown_fixed_rule(m, g, t):
     # print 'shut-down fixed:', g, t
     return m.UnitShutDn[g, t] == 1
 
-# def enforce_generator_output_limits_rule_part_a(m, g, t):
-#     return m.MinimumPowerOutput[g]*m.UnitOn[g, t] <= m.PowerGenerated[g,t]
-
 def thermal_gen_output_max_available_rule(m, g, t):
     return m.PowerGenerated[g,t] <= m.MaximumPowerAvailable[g, t]
 
 def thermal_gen_output_min_available_rule(m, g, t):
     return m.MinimumPowerAvailable[g, t] <= m.PowerGenerated[g,t]
-
-# def enforce_generator_output_limits_rule_part_c(m, g, t):
-#     return m.MaximumPowerAvailable[g, t] <= m.MaximumPowerOutput[g]*m.UnitOn[g, t]
 
 # Maximum available power of non-thermal units less than forecast
 def enforce_renewable_generator_output_limits_rule(m, g, t):
