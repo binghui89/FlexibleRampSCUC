@@ -139,9 +139,11 @@ class Network(object):
 def sigma_up_rule(m, g, t):
     t1 = m.TimePeriods.first()
     te = m.TimePeriods.last()
+    NT = value(m.NumTimePeriods)
     Tsu = value(m.StartupTime[g])
     TU0 = value(m.UnitOnT0State[g])
-    if t >= t1 + (Tsu - 1):
+    if (t >= t1 + (Tsu - 1)) and (NT >= Tsu):
+        # Start-up period from (t - Tsu + 1) to t
         return sum(
             m.UnitStartUp[g, t - i + 1]
             for i in range(1, Tsu + 1 )
@@ -151,6 +153,8 @@ def sigma_up_rule(m, g, t):
         # print g, t
         return 1
     else:
+        # Unit is not starting up, and the start-up period goes beyond the 
+        # first interval.
         return sum(
             m.UnitStartUp[g, t - i + 1]
             for i in range(1, (t-t1+1) + 1 ) # t-t1+1 is the number of intervals from t1 to t
@@ -159,8 +163,9 @@ def sigma_up_rule(m, g, t):
 def sigma_dn_rule(m, g, t):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
+    NT  = value(m.NumTimePeriods)
     Tsd = value(m.ShutdownTime[g])
-    if t <= te - Tsd:
+    if (t <= te - Tsd) and (NT > Tsd):
         return sum(
             m.UnitShutDn[g, t + i]
             for i in range(1, Tsd + 1 )
@@ -178,10 +183,11 @@ def sigma_dn_rule(m, g, t):
 def sigma_power_times_up_rule(m, g, t):
     t1 = m.TimePeriods.first()
     te = m.TimePeriods.last()
+    NT  = value(m.NumTimePeriods)
     Tsu = value(m.StartupTime[g])
     TU0 = value(m.UnitOnT0State[g])
     Pmin = value(m.MinimumPowerOutput[g])
-    if t >= t1 + (Tsu - 1):
+    if t >= t1 + (Tsu - 1) and (NT >= Tsu):
         return sum(
             m.UnitStartUp[g, t - i + 1]*float(i)/Tsu*Pmin
             for i in range(1, Tsu + 1 )
@@ -199,9 +205,10 @@ def sigma_power_times_up_rule(m, g, t):
 def sigma_power_times_dn_rule(m, g, t):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
+    NT  = value(m.NumTimePeriods)
     Tsd = value(m.ShutdownTime[g])
     Pmin = value(m.MinimumPowerOutput[g])
-    if t <= te - Tsd:
+    if t <= te - Tsd and (NT > Tsd):
         # float(Tsd-i+1)/Tsd*Pmin is the power level at the end of the ith 
         # shutting-down interval
         return sum(
@@ -219,20 +226,26 @@ def sigma_power_times_dn_rule(m, g, t):
 def sigma_dn_initial_rule(m, g):
     t1  = m.TimePeriods.first()
     t0  = t1 - 1 # So t1 must be no less than 1
-    Tsd = value(m.ShutdownTime[g])
+    NT  = value(m.NumTimePeriods)
+    i_end = min(value(m.ShutdownTime[g]), NT)
     return sum(
         m.UnitShutDn[g, t0 + i]
-        for i in range(1, Tsd + 1)
+        for i in range(1, i_end + 1)
     )
 
 def sigma_power_times_dn_initial_rule(m, g):
     t1  = m.TimePeriods.first()
+    te  = m.TimePeriods.last()
     t0  = t1 - 1 # So t1 must be no less than 1
     Tsd = value(m.ShutdownTime[g])
+    # For those super slow units, (t0 + Tsd - i + 1) may be greater than te, so 
+    # this is to make sure all terms of sigma_power_times_dn_initial_rule fall 
+    # in [t1, te]
+    i_start  = max(1, t0 - te + Tsd + 1)
     Pmin = value(m.MinimumPowerOutput[g])
     return sum(
         m.UnitShutDn[g, t0 + Tsd - i + 1]*float(Tsd-i+1)/Tsd*Pmin
-        for i in range(1, Tsd + 1)
+        for i in range(i_start, Tsd + 1)
     )
 
 def set_initial_shutdown_power_limits_rule(m):
@@ -387,12 +400,15 @@ def thermal_gen_indicator_shutdown_rule(m, g, t):
     return m.UnitOn[g, t] >= m.SigmaDn[g, t]
 
 def thermal_gen_indicator_overlap_rule(m, g, t):
+    te  = m.TimePeriods.last()
     Tsu = value(m.StartupTime[g])
     Tsd = value(m.ShutdownTime[g])
-    if t + Tsu + Tsd - 2 <= m.TimePeriods.last():
-        return m.UnitStartUp[g, t] + sum(m.UnitShutDn[g, t+i-1] for i in range(1, Tsu+Tsd)) <= 1
-    else:
-        return Constraint.Skip
+    N = min(Tsu+Tsd, te - t + 2)
+    return m.UnitStartUp[g, t] + sum(m.UnitShutDn[g, t+i-1] for i in range(1, N)) <= 1
+    # if t + Tsu + Tsd - 2 <= m.TimePeriods.last():
+    #     return m.UnitStartUp[g, t] + sum(m.UnitShutDn[g, t+i-1] for i in range(1, Tsu+Tsd)) <= 1
+    # else:
+    #     return m.UnitStartUp[g, t] + sum(m.UnitShutDn[g, t+i-1] for i in range(1, te - t + 2)) <= 1
 
 def thermal_gen_indicator_shutdown_fixed_rule(m, g, t):
     # print 'shut-down fixed:', g, t
@@ -1556,8 +1572,8 @@ def test_model_118():
     # Add start-up and shut-down time in a quick and dirty way
     network.df_gen.loc[:, 'STARTUP_TIME']  = network.df_gen.loc[:, 'MINIMUM_UP_TIME']
     network.df_gen.loc[:, 'SHUTDOWN_TIME'] = network.df_gen.loc[:, 'MINIMUM_UP_TIME']
-    network.df_gen.loc[network.df_gen['STARTUP_TIME']>=12,   'STARTUP_TIME']  = 12
-    network.df_gen.loc[network.df_gen['SHUTDOWN_TIME']>=12, 'SHUTDOWN_TIME']  = 12
+    # network.df_gen.loc[network.df_gen['STARTUP_TIME']>=12,   'STARTUP_TIME']  = 12
+    # network.df_gen.loc[network.df_gen['SHUTDOWN_TIME']>=12, 'SHUTDOWN_TIME']  = 12
 
     # Build network object, will moved to case specific initiation functions
     network.dict_gens = dict()
@@ -1610,17 +1626,55 @@ def test_model_118():
     if casename == '118':
         dict_UnitOnT0State = dict()
         dict_PowerGeneratedT0 = dict()
-        for g in network.dict_gens['Thermal']:
-            dict_UnitOnT0State[g]    = -12
-            dict_PowerGeneratedT0[g] = 0
 
-        # Start-up test, change the print in the sigma_up rule
+        # All units are off
+        # for g in network.dict_gens['Thermal']:
+        #     dict_UnitOnT0State[g]    = -12
+        #     dict_PowerGeneratedT0[g] = 0
+
+        # All units are on and at minimum generation levels
+        # for g in network.dict_gens['Thermal']:
+        #     dict_UnitOnT0State[g]    = 12
+        #     dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMIN']
+
+        # All units are on and at maximum generation levels
+        for g in network.dict_gens['Thermal']:
+            dict_UnitOnT0State[g]    = 12
+            dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMAX']
+
+        # Start-up test
+        # Pmax: 595 MW, Pmin: 298.29 MW, Tsu = Tsd = 8 hrs
         dict_PowerGeneratedT0['CC NG 35'] = 298.29/8*4
         dict_UnitOnT0State['CC NG 35'] = 4
 
-        # Shut-down test, change the print in the fix indicator rule
+        # Shut-down test
+        # Pmax: 943.5 MW, Pmin: 503.86 MW, Tsu = Tsd = 12 hrs
         dict_PowerGeneratedT0['CC NG 16'] = 503.86/8*3
         dict_UnitOnT0State['CC NG 16'] = 12
+
+        # Start-up/shut-down test for super slow units, of which the start-up 
+        # time is over the length of the model horizon.
+        # Pmax: 20 MW, Pmin: 6 MW, Tsu = Tsd = 48 hrs
+
+        # Start-up test # 1: Beginning of start-up period
+        dict_PowerGeneratedT0['ST Coal 01'] = 6.0/48*3
+        dict_UnitOnT0State['ST Coal 01'] = 3
+
+        # Start-up test # 2: End of start-up period 
+        # dict_PowerGeneratedT0['ST Coal 01'] = 6.0/48*40
+        # dict_UnitOnT0State['ST Coal 01'] = 40
+
+        # Shut-down test # 1: End of shut-down period
+        # Sadly, we still don't know how to model the case where z_{g, t} = 1 
+        # when t > te, in another word, when the ending interval of the 
+        # shut-down process is beyond the end of model horizon. However, such 
+        # scenario won't be the output of the UC model, since the UC model has 
+        # to know then the generator shuts down (i.e., z_{g, t} = 1) first hand.
+        # In another word, in the UC model results, when z_{g, t} = 1, t is 
+        # always less than te.
+        # dict_PowerGeneratedT0['ST Coal 01'] = 6.0/48*3
+        # dict_UnitOnT0State['ST Coal 01'] = 90
+
     elif casename == 'TX':
         dict_UnitOnT0State = dict()
         dict_PowerGeneratedT0 = dict()
@@ -1687,7 +1741,12 @@ def test_model_118():
     # Collect thermal generator information
     ls_dict_therm  = list()
     for g in instance.ThermalGenerators:
-        for a in ['PowerGenerated', 'UnitOn', 'UnitStartUp', 'UnitShutDn', 'SigmaUp', 'SigmaDn', 'SigmaPowerTimesUp', 'SigmaPowerTimesDn']:
+        for a in [
+            'PowerGenerated', 
+            'UnitOn', 'UnitStartUp', 'UnitShutDn', 
+            'SigmaUp', 'SigmaDn', 
+            'SigmaPowerTimesUp', 'SigmaPowerTimesDn'
+        ]:
             attr = getattr(instance, a)
             dict_row = {'Gen': g, 'Var': a}
             for t in instance.TimePeriods:
@@ -1705,7 +1764,7 @@ def test_model_118():
     for i in items:
         attr = getattr(instance, i)
         for k in attr.iterkeys():
-            if value(attr[k]) > 0:
+            if abs(value(attr[k])) > 1e-10: # Slack variable tolerance
                 print i, k, value(attr[k])
 
     ax1 = plt.subplot(1, 1, 1)
