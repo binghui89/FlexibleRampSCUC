@@ -1491,7 +1491,7 @@ def create_model(
 
     return model
 
-def test_model_118():
+def test_model(casename):
     t0 = time()
     content = ''
 
@@ -1511,39 +1511,38 @@ def test_model_118():
                 df_timesequence.loc[index, 't5'] = index
     df_timesequence = df_timesequence.astype('int')
 
-    # 118 bus system
-    casename = '118'
-    csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
-    csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
-    csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
-    csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
-    csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
-    csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
-    csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
-    csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
-    csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
-    csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
-    csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_generator.csv'
-    csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ed_loads.csv'
-    csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ed_generator.csv'
-    csv_busload_agc       = '/home/bxl180002/git/FlexibleRampSCUC/118bus/agc_loads.csv'
-    csv_genfor_agc        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/agc_generator.csv'
-
-    # Texas 2000 system
-    # casename = 'TX'
-    # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
-    # csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
-    # csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
-    # csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
-    # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
-    # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
-    # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
-    # csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
-    # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
-    # csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_load.csv'
-    # csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_generator.csv'
-    # csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_load.csv'
-    # csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_generator.csv'
+    if casename == '118':
+        # 118 bus system
+        csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
+        csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
+        csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
+        csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
+        csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
+        csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
+        csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
+        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
+        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
+        csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
+        csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_generator.csv'
+        csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ed_loads.csv'
+        csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ed_generator.csv'
+        csv_busload_agc       = '/home/bxl180002/git/FlexibleRampSCUC/118bus/agc_loads.csv'
+        csv_genfor_agc        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/agc_generator.csv'
+    elif casename == 'TX':
+        # Texas 2000 system
+        csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
+        csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
+        csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
+        csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
+        csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
+        csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
+        csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
+        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
+        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
+        csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_load.csv'
+        csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_generator.csv'
+        csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_load.csv'
+        csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_generator.csv'
 
 
     # Build network object, will moved to case specific initiation functions, 
@@ -1628,9 +1627,9 @@ def test_model_118():
         dict_PowerGeneratedT0 = dict()
 
         # All units are off
-        # for g in network.dict_gens['Thermal']:
-        #     dict_UnitOnT0State[g]    = -12
-        #     dict_PowerGeneratedT0[g] = 0
+        for g in network.dict_gens['Thermal']:
+            dict_UnitOnT0State[g]    = -12
+            dict_PowerGeneratedT0[g] = 0
 
         # All units are on and at minimum generation levels
         # for g in network.dict_gens['Thermal']:
@@ -1638,9 +1637,9 @@ def test_model_118():
         #     dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMIN']
 
         # All units are on and at maximum generation levels
-        for g in network.dict_gens['Thermal']:
-            dict_UnitOnT0State[g]    = 12
-            dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMAX']
+        # for g in network.dict_gens['Thermal']:
+        #     dict_UnitOnT0State[g]    = 12
+        #     dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMAX']
 
         # Start-up test
         # Pmax: 595 MW, Pmin: 298.29 MW, Tsu = Tsd = 8 hrs
@@ -1680,7 +1679,7 @@ def test_model_118():
         dict_PowerGeneratedT0 = dict()
         for g in network.dict_gens['Thermal']:
             dict_UnitOnT0State[g]    = 12
-            dict_PowerGeneratedT0[g] = value(network.df_gen.at[g, 'PMIN'])
+            dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMIN']
     ############################################################################
 
     ############################################################################
@@ -1812,6 +1811,8 @@ def test_model_118():
     # for i in range(0, len(ls_gens)):
     #     g = ls_gens[i]
     #     ax = plt.subplot(3, 3, i%9+1)
+    #     ax.step(df_gen.index, df_gen[g]+df_regup[g], where='post', color='b')
+    #     ax.step(df_gen.index, df_gen[g]-df_regdn[g], where='post', color='b')
     #     ax.step(df_gen.index, df_gen[g], where='post')
     #     ax.step(df_gen.index, [value(instance.MinimumPowerOutput[g])]*24, where='post')
     #     ax.set_title( g + ', Tsd = {:>g}'.format(value(instance.ShutdownTime[g])))
@@ -1819,5 +1820,6 @@ def test_model_118():
     #         plt.show()
 
 if __name__ == "__main__":
-    test_model_118()
+    casename = '118' # Options: '118' and 'TX'
+    test_model(casename)
     # test_old_model()
