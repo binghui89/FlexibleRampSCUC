@@ -311,7 +311,18 @@ def definition_hourly_curtailment_rule(m, t):
     return m.Curtailment[t] == sum(m.BusCurtailment[b, t] for b in m.LoadBuses)
 
 def production_equals_demand_rule(m, t):
-   return sum(m.PowerGenerated[g, t] for g in m.AllGenerators) + m.Curtailment[t] - m.OverCommit[t] == m.Demand[t]
+    '''
+    We need to distinguish energy between power. m.PowerGenerated[g, t] 
+    represents the power level of generator g at the *END* of interval t, while
+    the demand is represented as average MW level during interval t, so the 
+    total average power of all generators should be greater than the average load.
+    '''
+    if t is m.TimePeriods.first():
+        p_average = sum((m.PowerGeneratedT0[g] + m.PowerGenerated[g, t])/2 for g in m.AllGenerators)
+    else:
+        t_prev = m.TimePeriods.prev(t)
+        p_average = sum((m.PowerGenerated[g, t_prev] + m.PowerGenerated[g, t])/2 for g in m.AllGenerators)
+    return p_average + m.Curtailment[t] - m.OverCommit[t] == m.Demand[t]
 
 #############################################
 # generation limit and ramping constraints
@@ -647,14 +658,18 @@ def powerdollar_rule(m, g, t):
 
 # Production cost, per gen per time slice
 def production_cost_function(m, g, t):
+    '''
+    Production cost is the unit cost of generation per hour at a given output 
+    level, so the unit is $/h. Therefore, in order to calculate the total cost 
+    we need to multiply by time.
+    '''
     return m.ProductionCost[g,t] == (
-        # m.UnitOn[g,t]*margcost_df.loc[g,'nlcost']
         m.UnitOn[g,t]*m.BlockMarginalCost0[g]
         + sum(
             value(m.BlockMarginalCost[g,k])*(m.BlockPowerGenerated[g,k,t]) 
             for k in m.Blocks
         )
-    )
+    )*m.IntervalHour
 
 # Compute the total production costs, across all generators and time periods.
 def compute_total_production_cost_rule(m):
@@ -666,25 +681,9 @@ def compute_total_production_cost_rule(m):
 
 # Compute the per-generator, per-time period shut-down and start-up costs.
 def compute_shutdown_costs_rule(m, g, t):
-    # if t is m.TimePeriods.first():
-    #     return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (
-    #         m.UnitOnT0[g] - m.UnitOn[g, t]
-    #     )
-    # else:
-    #     return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * (
-    #         m.UnitOn[g, m.TimePeriods.prev(t)] - m.UnitOn[g, t]
-    #     )
     return m.ShutdownCost[g, t] >= m.ShutdownCostCoefficient[g] * m.UnitShutDn[g, t]
 
 def compute_startup_costs_rule(m, g, t):
-    # if t is m.TimePeriods.first():
-    #     return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (
-    #         -m.UnitOnT0[g] + m.UnitOn[g, t]
-    #     )
-    # else:
-    #     return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * (
-    #         -m.UnitOn[g, m.TimePeriods.prev(t)] + m.UnitOn[g, t]
-    #     )
     return m.StartupCost[g, t] >= m.StartupCostCoefficient[g] * m.UnitStartUp[g, t]
 
 # Compute the total startup and shutdown costs, across all generators and time periods.
@@ -701,7 +700,7 @@ def compute_total_curtailment_cost_rule(m):
         m.BusVOLL[b] * m.BusCurtailment[b,t]
         for b in m.LoadBuses 
         for t in m.TimePeriods
-    )
+    )*m.IntervalHour
 
 # Compute the total reserve shortage cost
 def compute_total_reserve_shortage_cost_rule(m):
@@ -710,7 +709,7 @@ def compute_total_reserve_shortage_cost_rule(m):
         + m.RegulatingReserveUpShortage[t] * 5500
         + m.RegulatingReserveDnShortage[t] * 5500
         for t in m.TimePeriods
-    )
+    )*m.IntervalHour
 
 # Compute the penalty cost associated with slack variables
 def SlackPenalty_rule(m):
@@ -762,6 +761,7 @@ def create_model(
     """SETS & PARAMETERS"""
     ##########################################################
     # The number of time periods under consideration, in addition to the corresponding set.
+    model.IntervalHour   = Param(within=PositiveReals, initialize=1.0/nI) # The length of one interval in hour
     model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(df_busload.index))
     model.TimePeriods    = Set(initialize=df_busload.index, ordered=True) # Time periods must be an ordered set of continuous integers
 
@@ -919,23 +919,6 @@ def create_model(
         mutable=True
     )
 
-    # if dict_UnitOnT0State:
-    #     # Use unit commitment statuses from previous RTUC solutions
-    #     model.UnitOnT0State = Param(
-    #         model.ThermalGenerators,
-    #         within=Integers,
-    #         initialize=dict_UnitOnT0State,
-    #         validate=t0_state_nonzero_validator,
-    #         mutable=True
-    #     )
-    # else:
-    #     model.UnitOnT0State = Param(
-    #         model.ThermalGenerators,
-    #         within=Integers,
-    #         initialize=(network.df_gen.loc[i_thermal, 'GEN_STATUS']*nI).to_dict(),
-    #         validate=t0_state_nonzero_validator,
-    #         mutable=True
-    #     )
     model.UnitOnT0State = Param(
         model.ThermalGenerators,
         within=Integers,
@@ -955,27 +938,27 @@ def create_model(
         mutable=True
     )
 
-    model.InitialTimePeriodsOnLine = Param(
-        model.ThermalGenerators,
-        within=NonNegativeIntegers,
-        initialize=initial_time_periods_online_rule,
-        mutable=True
-    )
-    model.InitialTimePeriodsOffLine = Param(
-        model.ThermalGenerators,
-        within=NonNegativeIntegers,
-        initialize=initial_time_periods_offline_rule,
-        mutable=True
-    )
+    # model.InitialTimePeriodsOnLine = Param(
+    #     model.ThermalGenerators,
+    #     within=NonNegativeIntegers,
+    #     initialize=initial_time_periods_online_rule,
+    #     mutable=True
+    # )
+    # model.InitialTimePeriodsOffLine = Param(
+    #     model.ThermalGenerators,
+    #     within=NonNegativeIntegers,
+    #     initialize=initial_time_periods_offline_rule,
+    #     mutable=True
+    # )
 
     # Generator power output at t=0 (initial condition). units are MW.
     model.PowerGeneratedT0 = Param(
-        model.ThermalGenerators,
+        model.AllGenerators,
         within=NonNegativeReals,
         initialize=(
             dict_PowerGeneratedT0 
             if dict_PowerGeneratedT0 
-            else network.df_gen.loc[i_thermal, 'PMIN'].to_dict()
+            else network.df_gen.loc[:, 'PMIN'].to_dict()
         ),
         mutable=True
     )
@@ -1626,21 +1609,29 @@ def test_model(casename):
         dict_UnitOnT0State = dict()
         dict_PowerGeneratedT0 = dict()
 
+        # Control initial conditions
+        ########################################################################
         # All units are off
-        for g in network.dict_gens['Thermal']:
-            dict_UnitOnT0State[g]    = -12
+        for g in network.dict_gens['ALL']:
             dict_PowerGeneratedT0[g] = 0
+            if g in network.dict_gens['Thermal']:
+                dict_UnitOnT0State[g]    = -12
 
         # All units are on and at minimum generation levels
-        # for g in network.dict_gens['Thermal']:
-        #     dict_UnitOnT0State[g]    = 12
+        # for g in network.dict_gens['ALL']:
         #     dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMIN']
+        #     if g in network.dict_gens['Thermal']:
+        #         dict_UnitOnT0State[g]    = 12
 
         # All units are on and at maximum generation levels
-        # for g in network.dict_gens['Thermal']:
-        #     dict_UnitOnT0State[g]    = 12
+        # for g in network.dict_gens['ALL']:
         #     dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMAX']
+        #     if g in network.dict_gens['Thermal']:
+        #         dict_UnitOnT0State[g]    = 12
+        ########################################################################
 
+        # Start-up/shut-down tests
+        ########################################################################
         # Start-up test
         # Pmax: 595 MW, Pmin: 298.29 MW, Tsu = Tsd = 8 hrs
         dict_PowerGeneratedT0['CC NG 35'] = 298.29/8*4
@@ -1673,6 +1664,7 @@ def test_model(casename):
         # always less than te.
         # dict_PowerGeneratedT0['ST Coal 01'] = 6.0/48*3
         # dict_UnitOnT0State['ST Coal 01'] = 90
+        ########################################################################
 
     elif casename == 'TX':
         dict_UnitOnT0State = dict()
