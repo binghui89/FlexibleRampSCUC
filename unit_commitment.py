@@ -1687,7 +1687,7 @@ def build_texas_network():
 
     return dfs, network_texas
 
-def test_dauc(casename):
+def test_dauc(casename, showing_gens='problematic'):
     t0 = time()
     content = ''
 
@@ -1863,19 +1863,29 @@ def test_dauc(casename):
             set_gens.add(k[0])
 
     # Results container
-    df_gen    = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.AllGenerators)
-    df_uniton = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
-    df_regup  = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
-    df_regdn  = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
-    df_spnup  = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
+    df_power_start = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.AllGenerators)
+    df_power_end   = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.AllGenerators)
+    df_uniton      = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
+    df_regup       = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
+    df_regdn       = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
+    df_spnup       = pd.DataFrame(np.nan, index=instance.TimePeriods, columns=instance.ThermalGenerators)
     for g in instance.AllGenerators:
         for t in instance.TimePeriods:
-            df_gen.at[t, g] = value(instance.PowerGenerated[g, t])
+            df_power_end.at[t, g] = value(instance.PowerGenerated[g, t])
+            if t == instance.TimePeriods.first():
+                df_power_start.at[t, g] = value(instance.PowerGeneratedT0[g])
+            else:
+                df_power_start.at[t, g] = value(instance.PowerGenerated[g, t-1])
             if g in instance.ThermalGenerators:
                 df_uniton.at[t, g] = value(instance.UnitOn[g, t])
                 df_regup.at[t, g]  = value(instance.RegulatingReserveUpAvailable[g, t])
                 df_regdn.at[t, g]  = value(instance.RegulatingReserveDnAvailable[g, t])
                 df_spnup.at[t, g]  = value(instance.SpinningReserveUpAvailable[g, t])
+    df_power_mean = pd.DataFrame(
+        (df_power_start + df_power_end)/2, 
+        index=instance.TimePeriods, 
+        columns=instance.AllGenerators,
+    )
 
     # Collect thermal generator information
     ls_dict_therm  = list()
@@ -1909,8 +1919,8 @@ def test_dauc(casename):
     ax1 = plt.subplot(1, 1, 1)
     ax2 = ax1.twinx()
     ax1.step(
-        df_gen.index,
-        df_gen.values.sum(axis=1),
+        df_power_mean.index,
+        df_power_mean.values.sum(axis=1),
         where='post',
         color='b',
         label='Generation'
@@ -1922,19 +1932,21 @@ def test_dauc(casename):
         color='k',
         label='Total load'
     )
-    ax1.step(
-        df_gen.index,
-        df_gen.values.sum(axis=1)-df_regdn.values.sum(axis=1),
-        where='post',
+    ax1.fill_between(
+        df_power_mean.index,
+        df_power_mean.values.sum(axis=1)-df_regdn.values.sum(axis=1),
+        df_power_mean.values.sum(axis=1),
         color='b',
-        label='REGDN'
+        step='post',
+        alpha=0.2,
     )
-    ax1.step(
-        df_gen.index,
-        df_gen.values.sum(axis=1)+df_regup.values.sum(axis=1),
-        where='post',
-        color='b',
-        label='REGUP'
+    ax1.fill_between(
+        df_power_mean.index,
+        df_power_mean.values.sum(axis=1),
+        df_power_mean.values.sum(axis=1)+df_regup.values.sum(axis=1),
+        color='r',
+        step='post',
+        alpha=0.2,
     )
     ax2.step(
         df_uniton.index,
@@ -1945,20 +1957,47 @@ def test_dauc(casename):
     )
     plt.legend()
     plt.show()
+
+    if showing_gens == 'problematic':
+        # Showing only problematic thermal gens, whose sigma up/down may be 
+        # fractional numbers
+        ls_gens = list(set_gens)
+    elif showing_gens == 'all':
+        # Showing all thermal gens
+        ls_gens = list(instance.ThermalGenerators.value)
+
+    for i in range(0, len(ls_gens)):
+        g = ls_gens[i]
+        if i%9 == 0:
+            plt.figure()
+        ax = plt.subplot(3, 3, i%9+1)
+        ax.fill_between(
+            df_power_end.index, 
+            df_power_end[g] - df_regdn[g], 
+            df_power_end[g], 
+            color='b', 
+            step='post', 
+            alpha=0.2,
+        )
+        ax.fill_between(
+            df_power_end.index, 
+            df_power_end[g], 
+            df_power_end[g]+df_regup[g], 
+            color='r', 
+            step='post', 
+            alpha=0.2,
+        )
+        ax.step(df_power_end.index, df_power_end[g], where='post')
+        ax.step(df_power_end.index, [value(instance.MinimumPowerOutput[g])]*24, where='post')
+        ax.set_title( g + ', Tsd = {:>g}'.format(value(instance.ShutdownTime[g])))
+        if i%9 == 8:
+            plt.show()
+        elif i == len(ls_gens) - 1:
+            plt.show()
+
     IP()
 
-    # ls_gens = list(set_gens)
-    # for i in range(0, len(ls_gens)):
-    #     g = ls_gens[i]
-    #     ax = plt.subplot(3, 3, i%9+1)
-    #     ax.step(df_gen.index, df_gen[g]+df_regup[g], where='post', color='b')
-    #     ax.step(df_gen.index, df_gen[g]-df_regdn[g], where='post', color='b')
-    #     ax.step(df_gen.index, df_gen[g], where='post')
-    #     ax.step(df_gen.index, [value(instance.MinimumPowerOutput[g])]*24, where='post')
-    #     ax.set_title( g + ', Tsd = {:>g}'.format(value(instance.ShutdownTime[g])))
-    #     if i%9 == 8:
-    #         plt.show()
 
 if __name__ == '__main__':
-    test_dauc('TX')
+    test_dauc('118')
 
