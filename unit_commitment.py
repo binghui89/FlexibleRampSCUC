@@ -13,13 +13,13 @@ class MyDataFrame(DataFrame):
         if tol:
             for i in self.index:
                 for j in self.columns:
-                    v = self.loc[i, j]
+                    v = self.at[i, j]
                     if abs(v) >= tol:
                         dict_df[i,j] = v
         else:
             for i in self.index:
                 for j in self.columns:
-                    dict_df[i,j] = self.loc[i, j]
+                    dict_df[i,j] = self.at[i, j]
         return dict_df
 
 class Network(object):
@@ -790,11 +790,13 @@ def create_model(
 
     # Number of cost function blockes indexed by (gen, block)
     model.BlockSize = Param(
-        model.ThermalGenerators, model.Blocks,
+        model.ThermalGenerators, 
+        model.Blocks,
         initialize=network.return_dict_blockoutputlimit()
     )
     model.BlockMarginalCost = Param(
-        model.ThermalGenerators, model.Blocks, 
+        model.ThermalGenerators, 
+        model.Blocks, 
         within=NonNegativeReals,
         initialize=network.return_dict_blockmargcost()
     )
@@ -821,7 +823,8 @@ def create_model(
 
     # PTDF.
     model.PTDF = Param(
-        model.Branches, model.Buses,
+        model.Branches, 
+        model.Buses,
         within=Reals,
         initialize=network.return_dict_ptdf(tol=None),
         default=0.0
@@ -846,7 +849,8 @@ def create_model(
 
     # The bus-by-bus demand and value of loss load, for each time period. units are MW and $/MW.
     model.BusDemand = Param(
-        model.LoadBuses, model.TimePeriods,
+        model.LoadBuses, 
+        model.TimePeriods,
         within=NonNegativeReals,
         initialize=MyDataFrame(df_busload.T).to_dict_2d(), 
         mutable=True
@@ -895,30 +899,31 @@ def create_model(
     model.StartupTime = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=(network.df_gen.loc[i_thermal, 'STARTUP_TIME']).to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'STARTUP_TIME']*nI).to_dict(),
         # validate=at_least_generator_minimum_output_validator,
     )
     model.ShutdownTime = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=(network.df_gen.loc[i_thermal, 'SHUTDOWN_TIME']).to_dict(),
+        initialize=(network.df_gen.loc[i_thermal, 'SHUTDOWN_TIME']*nI).to_dict(),
         # validate=at_least_generator_minimum_output_validator,
     )
 
     # Min number of time periods that a gen must be on-line (off-line) once brought up (down).
-    model.MinimumUpTime = Param(
-        model.ThermalGenerators,
-        within=NonNegativeIntegers,
-        initialize=(network.df_gen.loc[i_thermal, 'MINIMUM_UP_TIME']*nI).to_dict(),
-        mutable=True
-    )
-    model.MinimumDownTime = Param(
-        model.ThermalGenerators,
-        within=NonNegativeIntegers,
-        initialize=(network.df_gen.loc[i_thermal, 'MINIMUM_DOWN_TIME']*nI).to_dict(),
-        mutable=True
-    )
+    # model.MinimumUpTime = Param(
+    #     model.ThermalGenerators,
+    #     within=NonNegativeIntegers,
+    #     initialize=(network.df_gen.loc[i_thermal, 'MINIMUM_UP_TIME']*nI).to_dict(),
+    #     mutable=True
+    # )
+    # model.MinimumDownTime = Param(
+    #     model.ThermalGenerators,
+    #     within=NonNegativeIntegers,
+    #     initialize=(network.df_gen.loc[i_thermal, 'MINIMUM_DOWN_TIME']*nI).to_dict(),
+    #     mutable=True
+    # )
 
+    # Number of intervals the units have been online
     model.UnitOnT0State = Param(
         model.ThermalGenerators,
         within=Integers,
@@ -1474,7 +1479,7 @@ def create_model(
 
     return model
 
-def test_model(casename):
+def test_dauc(casename):
     t0 = time()
     content = ''
 
@@ -1575,6 +1580,7 @@ def test_model(casename):
         & 
         (network.df_gen['GEN_TYPE']=='Thermal')
     ].index
+
     # Bus-generator matrix
     network.ls_bus = network.df_ptdf.columns.tolist()
     network.mat_busgen=np.zeros([len(network.ls_bus), len(network.dict_gens['ALL'])])
@@ -1813,5 +1819,5 @@ def test_model(casename):
 
 if __name__ == "__main__":
     casename = '118' # Options: '118' and 'TX'
-    test_model(casename)
+    test_dauc(casename)
     # test_old_model()
