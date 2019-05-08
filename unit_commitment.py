@@ -7,6 +7,9 @@ from time import time
 from matplotlib import pyplot as plt
 from IPython import embed as IP
 
+class GroupDataFrame(object):
+    pass
+
 class MyDataFrame(DataFrame):
     def to_dict_2d(self, tol=None):
         dict_df = dict()
@@ -22,125 +25,52 @@ class MyDataFrame(DataFrame):
                     dict_df[i,j] = self.at[i, j]
         return dict_df
 
-class Network(object):
-    def __init__(self, csvbus, csvbranch, csvptdf, csvgen, csvmarginalcost, csvblockmarginalcost, csvblockoutputlimit):
-        self.df_bus              = pd.read_csv(csvbus,               index_col=['BUS_ID'])
-        self.df_branch           = pd.read_csv(csvbranch,            index_col=['BR_ID'])
-        self.df_ptdf             = pd.read_csv(csvptdf,              index_col=0)
-        self.df_gen              = pd.read_csv(csvgen,               index_col=0)
-        self.df_margcost         = pd.read_csv(csvmarginalcost,      index_col=0)
-        self.df_blockmargcost    = pd.read_csv(csvblockmarginalcost, index_col=0)
-        self.df_blockoutputlimit = pd.read_csv(csvblockoutputlimit,  index_col=0)
-        self.enforce_kv_level(0) # Enforce the 230 kV limits
-        self.update_gen_param() # Add start-up/shut-down costs and min on/offline hours
+class NewNetwork(object):
+    def __init__(self):
+        # Maybe we should validate all the sets first
 
-    def enforce_kv_level(self, kv_level):
-        bus_kVlevel_set = set(self.df_bus[self.df_bus['BASEKV']>=kv_level].index)
-        branch_kVlevel_set = {
-            i for i in self.df_branch.index
-            if self.df_branch.loc[i,'F_BUS'] in bus_kVlevel_set 
-            and self.df_branch.loc[i,'T_BUS'] in bus_kVlevel_set
-        }
-        self.set_valid_branch = branch_kVlevel_set
-        self.df_ptdf = self.df_ptdf.loc[self.set_valid_branch,:].copy()
+        self.set_bus = set()
 
-    def update_gen_param(self):
-        # This function add start-up/shut-down costs and min on/offline hours
-        # This iteration-based way is not the most Pythonic, but it gets better readability
-        for i, row in self.df_gen.iterrows():
-            cap    = self.df_gen.loc[i, 'PMAX']
-            s_cost = self.df_gen.loc[i, 'STARTUP']
-            tmin   = self.df_gen.loc[i, 'MINIMUM_UP_TIME']
-            t0     = self.df_gen.loc[i, 'GEN_STATUS']
-            if i.startswith('coal'):
-                if cap <= 300:
-                    # Subcritical steam cycle
-                    s_cost = 16.28*cap
-                    tmin = 4 # Min on/offline time
-                    t0 = tmin # Initial online time
-                else:
-                    # Supercritical steam cycle
-                    s_cost = 29.44*cap
-                    tmin = 12
-                    t0 = tmin
-            elif i.startswith('ng'):
-                if cap <= 50:
-                    # Small aeroderivative turbines
-                    s_cost = 8.23*cap
-                    tmin = 1
-                    t0 = tmin
-                elif cap <= 100:
-                    # Small aeroderivative turbines
-                    s_cost = 8.23*cap
-                    tmin = 3
-                    t0 = tmin
-                elif cap <= 450:
-                    # Heavy-duty GT
-                    s_cost = 1.70*cap
-                    tmin = 5
-                    t0 = tmin
-                else:
-                    # CCGT
-                    s_cost = 1.74*cap
-                    tmin = 8
-                    t0 = tmin
-            elif i.startswith('nuc'):
-                # Supercritical steam cycle
-                s_cost = 29.44*cap
-                tmin = 100
-                t0 = 1 # Nuclear units never go offline
+        self.dict_set_gens = dict()
+        self.dict_set_gens['ALL']        = set()
+        self.dict_set_gens['THERMAL']    = set()
+        self.dict_set_gens['NONTHERMAL'] = set()
+        self.dict_set_gens['RENEWABLE']  = set()
+        self.dict_set_gens['HYDRO']      = set()
+        self.dict_set_gens['WIND']       = set()
 
-            self.df_gen.loc[i, 'STARTUP']  = s_cost
-            self.df_gen.loc[i, 'SHUTDOWN'] = s_cost
-            self.df_gen.loc[i, 'MINIMUM_UP_TIME']   = tmin
-            self.df_gen.loc[i, 'MINIMUM_DOWN_TIME'] = tmin
-            self.df_gen.loc[i, 'GEN_STATUS'] = t0 # All but nuclear units are free to be go offline
+        self.set_block = set()
+        self.set_branches = set()
+        self.set_branches_enforced = set()
 
-        self.df_gen['STARTUP_RAMP']  = self.df_gen[['STARTUP_RAMP','PMIN']].max(axis=1)
-        self.df_gen['SHUTDOWN_RAMP'] = self.df_gen[['SHUTDOWN_RAMP','PMIN']].max(axis=1)
+        self.dict_block_size_by_gen_block = dict()
+        self.dict_block_cost_by_gen_block = dict()
+        self.dict_block_size0_by_gen = dict()
+        self.dict_block_cost0_by_gen = dict()
 
-        # Assume renewable sources cost nothing to start
-        self.df_gen.loc[self.df_gen['GEN_TYPE']=='Renewable', 'STARTUP'] = 0
+        self.dict_ptdf_by_br_bus = dict()
 
-        # Update 1 hour ramp rates
-        self.df_gen['RAMP_60'] = self.df_gen['RAMP_10']*6
+        self.dict_linelimits_by_br = dict()
 
-    def return_dict(self, attr, tol=None):
-        # This method is a generic function that converts a Pandas dataframe 
-        # into a dictionary.
-        df = getattr(self, attr)
-        dict_df = dict()
-        if tol:
-            for i in df.index:
-                for j in df.columns:
-                    v = df.loc[i, j]
-                    if abs(v) >= tol:
-                        dict_df[i,j] = v
-        else:
-            for i in df.index:
-                for j in df.columns:
-                    dict_df[i,j] = df.loc[i, j]
-        return dict_df
+        self.dict_pmin_by_gen         = dict()
+        self.dict_pmax_by_gen         = dict()
+        self.dict_rampup_by_gen       = dict()
+        self.dict_rampdn_by_gen       = dict()
+        self.dict_h_startup_by_gen    = dict()
+        self.dict_h_shutdn_by_gen     = dict()
+        self.dict_h_minup_by_gen      = dict()
+        self.dict_h_mindn_by_gen      = dict()
+        self.dict_t_uniton_by_gen     = dict()
+        self.dict_cost_startup_by_gen = dict()
+        self.dict_cost_shutdn_by_gen  = dict()
 
-    def return_dict_ptdf(self, tol=None):
-        # Find out all shift factors that are greater than tolerance, which 
-        # defaults to 1e-5
-        dict_ptdf = self.return_dict('df_ptdf', tol)
-        return dict_ptdf
-
-    def return_dict_blockmargcost(self):
-        dict_blockmargcost = self.return_dict('df_blockmargcost')
-        return dict_blockmargcost
-
-    def return_dict_blockoutputlimit(self):
-        dict_blockoutputlimit = self.return_dict('df_blockoutputlimit')
-        return dict_blockoutputlimit
+        self.dict_reserve_margin = dict()
 
 def sigma_up_rule(m, g, t):
     t1 = m.TimePeriods.first()
     te = m.TimePeriods.last()
     NT = value(m.NumTimePeriods)
-    Tsu = value(m.StartupTime[g])
+    Tsu = value(m.StartupTime[g]*m.nI) # m.StartupTime is in hour
     TU0 = value(m.UnitOnT0State[g])
     if (t >= t1 + (Tsu - 1)) and (NT >= Tsu):
         # Start-up period from (t - Tsu + 1) to t
@@ -164,7 +94,7 @@ def sigma_dn_rule(m, g, t):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
     NT  = value(m.NumTimePeriods)
-    Tsd = value(m.ShutdownTime[g])
+    Tsd = value(m.ShutdownTime[g]*m.nI) # m.ShutdownTime is in hour
     if (t <= te - Tsd) and (NT > Tsd):
         return sum(
             m.UnitShutDn[g, t + i]
@@ -184,7 +114,7 @@ def sigma_power_times_up_rule(m, g, t):
     t1 = m.TimePeriods.first()
     te = m.TimePeriods.last()
     NT  = value(m.NumTimePeriods)
-    Tsu = value(m.StartupTime[g])
+    Tsu = value(m.StartupTime[g]*m.nI) # m.StartupTime is in hour
     TU0 = value(m.UnitOnT0State[g])
     Pmin = value(m.MinimumPowerOutput[g])
     if t >= t1 + (Tsu - 1) and (NT >= Tsu):
@@ -206,7 +136,7 @@ def sigma_power_times_dn_rule(m, g, t):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
     NT  = value(m.NumTimePeriods)
-    Tsd = value(m.ShutdownTime[g])
+    Tsd = value(m.ShutdownTime[g]*m.nI) # m.ShutdownTime is in hour
     Pmin = value(m.MinimumPowerOutput[g])
     if t <= te - Tsd and (NT > Tsd):
         # float(Tsd-i+1)/Tsd*Pmin is the power level at the end of the ith 
@@ -227,7 +157,7 @@ def sigma_dn_initial_rule(m, g):
     t1  = m.TimePeriods.first()
     t0  = t1 - 1 # So t1 must be no less than 1
     NT  = value(m.NumTimePeriods)
-    i_end = min(value(m.ShutdownTime[g]), NT)
+    i_end = min(value(m.ShutdownTime[g]*m.nI), NT) # m.ShutdownTime is in hour
     return sum(
         m.UnitShutDn[g, t0 + i]
         for i in range(1, i_end + 1)
@@ -237,7 +167,7 @@ def sigma_power_times_dn_initial_rule(m, g):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
     t0  = t1 - 1 # So t1 must be no less than 1
-    Tsd = value(m.ShutdownTime[g])
+    Tsd = value(m.ShutdownTime[g]*m.nI) # m.ShutdownTime is in hour
     # For those super slow units, (t0 + Tsd - i + 1) may be greater than te, so 
     # this is to make sure all terms of sigma_power_times_dn_initial_rule fall 
     # in [t1, te]
@@ -251,7 +181,8 @@ def sigma_power_times_dn_initial_rule(m, g):
 def set_initial_shutdown_power_limits_rule(m):
     set_gen = set()
     for g in m.ThermalGenerators:
-        if value(m.UnitOnT0State[g]) >= value(m.ShutdownTime[g]):
+        Tsd = value(m.ShutdownTime[g]*m.nI) # m.ShutdownTime is in hour
+        if value(m.UnitOnT0State[g]) >= Tsd:
             set_gen.add(g)
     return set_gen
 
@@ -342,8 +273,8 @@ def init_set_fix_shutdown(m):
         v0 = value(m.UnitOnT0[g])
         P0 = value(m.PowerGeneratedT0[g])
         Pmin = value(m.MinimumPowerOutput[g])
-        Tsu  = value(m.StartupTime[g])
-        Tsd  = value(m.ShutdownTime[g])
+        Tsu  = value(m.StartupTime[g]*m.nI) # m.StartupTime is in hour
+        Tsd  = value(m.ShutdownTime[g]*m.nI) # m.ShutdownTime is in hour
         Tu0  = value(m.UnitOnT0State[g])
         if (v0==1) and (P0 < Pmin) and (Tu0 > Tsu):
             # Which shut-down interval am I in?
@@ -371,31 +302,33 @@ def thermal_gen_output_limits_shutdown_upper_rule(m, g, t):
     return m.MaximumPowerAvailable[g, t] <= (m.UnitOn[g, t] - m.SigmaDn[g, t])*m.MaximumPowerOutput[g] + m.SigmaPowerTimesDn[g, t] + m.Slack_shutdown_upper[g, t]
 
 def thermal_gen_output_limits_overlap_startup_rule(m, g, t):
-    Tsu  = value(m.StartupTime[g])
+    Tsu  = value(m.StartupTime[g]*m.nI) # m.StartupTime is in hour
     Pmin = value(m.MinimumPowerOutput[g])
     return m.MinimumPowerAvailable[g, t] + m.Slack_overlap_startup[g, t] >= (m.SigmaDn[g, t] + m.SigmaUp[g, t] - 1)*float(Tsu)/Tsu*Pmin
 
 def thermal_gen_output_limits_overlap_shutdown_rule(m, g, t):
-    Tsd = value(m.ShutdownTime[g])
+    Tsd = value(m.ShutdownTime[g]*m.nI) # m.ShutdownTime is in hour
     Pmin = value(m.MinimumPowerOutput[g])
     return m.MinimumPowerAvailable[g, t] + m.Slack_overlap_shutdown[g, t] >= (m.SigmaDn[g, t] + m.SigmaUp[g, t] - 1)*float(Tsd-1+1)/Tsd*Pmin
 
 def thermal_gen_rampup_rule(m, g, t):
+    ramp_per_interval = m.NominalRampUpLimit[g]/m.nI # m.NominalRampUpLimit[g] is ramp rate per hour
     if t is m.TimePeriods.first():
         power_last_period = m.PowerGeneratedT0[g]
     else:
         t_prev = m.TimePeriods.prev(t)
         power_last_period = m.PowerGenerated[g, t_prev]
-    return m.MaximumPowerAvailable[g, t] - power_last_period - m.Slack_rampup[g, t] <= m.SigmaUp[g,t]*m.MaximumPowerOutput[g] + m.NominalRampUpLimit[g]*(m.UnitOn[g, t] - m.SigmaUp[g, t]) 
+    return m.MaximumPowerAvailable[g, t] - power_last_period - m.Slack_rampup[g, t] <= m.SigmaUp[g,t]*m.MaximumPowerOutput[g] + ramp_per_interval*(m.UnitOn[g, t] - m.SigmaUp[g, t]) 
 
 def thermal_gen_rampdn_rule(m, g, t):
+    ramp_per_interval = m.NominalRampDownLimit[g]/m.nI # m.NominalRampDownLimit[g] is ramp rate per hour
+    Tsd = m.ShutdownTime[g]*m.nI # m.ShutdownTime is in hour
     if t is m.TimePeriods.first():
         power_last_period = m.PowerGeneratedT0[g]
     else:
         t_prev = m.TimePeriods.prev(t)
         power_last_period = m.PowerGenerated[g, t_prev]
-    # return power_last_period - m.PowerGenerated[g, t] - m.Slack_rampdn[g, t] <= (m.SigmaDn[g,t])*m.MaximumPowerOutput[g] + m.NominalRampDownLimit[g]*(m.UnitOn[g, t] - m.SigmaDn[g, t]) 
-    return power_last_period - m.PowerGenerated[g, t] - m.Slack_rampdn[g, t] <= (m.SigmaDn[g,t] + m.UnitShutDn[g,t])*m.MinimumPowerOutput[g]/m.ShutdownTime[g] + m.NominalRampDownLimit[g]*(m.UnitOn[g, t] - m.SigmaDn[g, t]) 
+    return power_last_period - m.PowerGenerated[g, t] - m.Slack_rampdn[g, t] <= (m.SigmaDn[g,t] + m.UnitShutDn[g,t])*m.MinimumPowerOutput[g]/Tsd + ramp_per_interval*(m.UnitOn[g, t] - m.SigmaDn[g, t]) 
 
 def thermal_gen_startup_shutdown_rule(m, g, t):
     if t is m.TimePeriods.first():
@@ -412,8 +345,8 @@ def thermal_gen_indicator_shutdown_rule(m, g, t):
 
 def thermal_gen_indicator_overlap_rule(m, g, t):
     te  = m.TimePeriods.last()
-    Tsu = value(m.StartupTime[g])
-    Tsd = value(m.ShutdownTime[g])
+    Tsu = value(m.StartupTime[g]*m.nI) # m.StartupTime is in hour
+    Tsd = value(m.ShutdownTime[g]*m.nI) # m.ShutdownTime is in hour
     N = min(Tsu+Tsd, te - t + 2)
     return m.UnitStartUp[g, t] + sum(m.UnitShutDn[g, t+i-1] for i in range(1, N)) <= 1
     # if t + Tsu + Tsd - 2 <= m.TimePeriods.last():
@@ -746,8 +679,8 @@ def create_model(
     network,
     df_busload, # Only bus load, first dimension time starts from 1, no total load
     df_genfor_nonthermal, # Only generation from nonthermal gens, first dim time starts from 1
-    ReserveFactor,
-    RegulatingReserveFactor,
+    # ReserveFactor,
+    # RegulatingReserveFactor,
     nI, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
     dict_UnitOnT0State=None, # How many time periods the units have been on at T0 from last RTUC model
     dict_PowerGeneratedT0=None, # Initial power generation level at T0 from last RTUC model
@@ -761,18 +694,19 @@ def create_model(
     """SETS & PARAMETERS"""
     ##########################################################
     # The number of time periods under consideration, in addition to the corresponding set.
+    model.nI             = Param(within=Integers, initialize=nI) # Number of intervals in one hour
     model.IntervalHour   = Param(within=PositiveReals, initialize=1.0/nI) # The length of one interval in hour
     model.NumTimePeriods = Param(within=PositiveIntegers, initialize=len(df_busload.index))
     model.TimePeriods    = Set(initialize=df_busload.index, ordered=True) # Time periods must be an ordered set of continuous integers
 
     # String indentifiers for the sets of different types of generators.
-    i_thermal = (network.df_gen['GEN_TYPE']=='Thermal')
-    model.AllGenerators        = Set(initialize=network.df_gen.index)
-    model.ThermalGenerators    = Set(initialize=network.df_gen[i_thermal].index)
-    model.NonThermalGenerators = Set(initialize=network.df_gen[~i_thermal].index)
-    model.RenewableGenerators  = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Renewable'].index)
-    model.HydroGenerators      = Set(initialize=network.df_gen[network.df_gen['GEN_TYPE']=='Hydro'].index)
-    model.WindGenerators       = Set(initialize=[i for i in network.df_gen.index if i.startswith('wind')])
+    # i_thermal = (network.df_gen['GEN_TYPE']=='Thermal')
+    model.AllGenerators        = Set(initialize=network.dict_set_gens['ALL'])
+    model.ThermalGenerators    = Set(initialize=network.dict_set_gens['THERMAL'])
+    model.NonThermalGenerators = Set(initialize=network.dict_set_gens['NONTHERMAL'])
+    model.RenewableGenerators  = Set(initialize=network.dict_set_gens['RENEWABLE'])
+    model.HydroGenerators      = Set(initialize=network.dict_set_gens['HYDRO'])
+    model.WindGenerators       = Set(initialize=network.dict_set_gens['WIND'])
 
     # if dict_uniton_da:
     #     set_slow = set( i[0] for i in dict_uniton_da.iterkeys() )
@@ -786,47 +720,47 @@ def create_model(
         # )
 
     # Set of Generator Blocks Set.
-    model.Blocks = Set(initialize = network.df_blockmargcost.columns)
+    model.Blocks = Set(initialize = network.set_block)
 
     # Number of cost function blockes indexed by (gen, block)
     model.BlockSize = Param(
         model.ThermalGenerators, 
         model.Blocks,
-        initialize=network.return_dict_blockoutputlimit()
+        initialize=network.dict_block_size_by_gen_block
     )
     model.BlockMarginalCost = Param(
         model.ThermalGenerators, 
         model.Blocks, 
         within=NonNegativeReals,
-        initialize=network.return_dict_blockmargcost()
+        initialize=network.dict_block_cost_by_gen_block
     )
     model.BlockSize0 = Param(
         model.ThermalGenerators,
-        initialize=network.df_margcost['Pmax0'].to_dict()
+        initialize=network.dict_block_size0_by_gen
     )
     model.BlockMarginalCost0 = Param(
         model.ThermalGenerators,
-        initialize=network.df_margcost['nlcost'].to_dict()
+        initialize=network.dict_block_cost0_by_gen
     )
 
     # String indentifiers for the set of load buses.
     # model.LoadBuses = Set(initialize=load_s_df.columns)
     model.LoadBuses = Set(initialize=df_busload.columns)
-    model.Buses     = Set(initialize=network.df_bus.index)
+    model.Buses     = Set(initialize=network.set_bus)
     # Buses indexed by all generators.
-    model.GenBuses = Param(model.AllGenerators, initialize=network.df_gen['GEN_BUS'].to_dict())
+    model.GenBuses = Param(model.AllGenerators, initialize=network.dict_genbus_by_gen)
 
 
     # String indentifiers for the set of branches.
-    model.Branches         = Set(initialize=network.df_branch.index)
-    model.EnforcedBranches = Set(initialize=network.set_valid_branch)
+    model.Branches         = Set(initialize=network.set_branches)
+    model.EnforcedBranches = Set(initialize=network.set_branches_enforced)
 
     # PTDF.
     model.PTDF = Param(
         model.Branches, 
         model.Buses,
         within=Reals,
-        initialize=network.return_dict_ptdf(tol=None),
+        initialize=network.dict_ptdf_by_br_bus,
         default=0.0
     )
 
@@ -836,7 +770,7 @@ def create_model(
         model.Branches,
         # model.EnforcedBranches,
         within=NonNegativeReals,
-        initialize = network.df_branch['RATE_A'].to_dict()
+        initialize = network.dict_linelimits_by_br
     )
 
     # The global system demand, for each time period. units are MW.
@@ -858,7 +792,7 @@ def create_model(
     model.BusVOLL = Param(
         model.LoadBuses,
         within=NonNegativeReals,
-        initialize=network.df_bus[ network.df_bus['PD']>0 ][ 'VOLL' ].to_dict()
+        initialize=network.dict_busvoll_by_bus
     )
 
     # Power forecasts for renewables indexed by (gen, time)
@@ -873,39 +807,39 @@ def create_model(
     model.MinimumPowerOutput = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=network.df_gen.loc[i_thermal, 'PMIN'].to_dict()
+        initialize=network.dict_pmin_by_gen
     )
     model.MaximumPowerOutput = Param(
         model.ThermalGenerators,
         within=NonNegativeReals, 
-        initialize=network.df_gen.loc[i_thermal, 'PMAX'].to_dict(),
+        initialize=network.dict_pmax_by_gen,
         validate=maximum_power_output_validator
     )
 
-    # Generator ramp up/down rates. units are MW/interval.
+    # Generator ramp up/down rates. units are MW/hour.
     # Limits for normal time periods
     model.NominalRampUpLimit   = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=(network.df_gen.loc[i_thermal, 'RAMP_10']/nI).to_dict(),
+        initialize=network.dict_rampup_by_gen,
     )
     model.NominalRampDownLimit = Param(
         model.ThermalGenerators,
         within=NonNegativeReals, 
-        initialize=(network.df_gen.loc[i_thermal, 'RAMP_10']/nI).to_dict(),
+        initialize=network.dict_rampdn_by_gen,
     )
 
-    # Start-up and shut-down time in intervals for thermal gens
+    # Start-up and shut-down time in hours for thermal gens
     model.StartupTime = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=(network.df_gen.loc[i_thermal, 'STARTUP_TIME']*nI).to_dict(),
+        initialize=network.dict_h_startup_by_gen,
         # validate=at_least_generator_minimum_output_validator,
     )
     model.ShutdownTime = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
-        initialize=(network.df_gen.loc[i_thermal, 'SHUTDOWN_TIME']*nI).to_dict(),
+        initialize=network.dict_h_shutdn_by_gen,
         # validate=at_least_generator_minimum_output_validator,
     )
 
@@ -930,7 +864,7 @@ def create_model(
         initialize=(
             dict_UnitOnT0State
             if dict_UnitOnT0State
-            else (network.df_gen.loc[i_thermal, 'GEN_STATUS']*nI).to_dict()
+            else network.dict_t_uniton_by_gen # This is not hour, this is # of intervals!
         ),
         validate=t0_state_nonzero_validator,
         mutable=True
@@ -963,7 +897,7 @@ def create_model(
         initialize=(
             dict_PowerGeneratedT0 
             if dict_PowerGeneratedT0 
-            else network.df_gen.loc[:, 'PMIN'].to_dict()
+            else network.dict_pmin_by_gen
         ),
         mutable=True
     )
@@ -971,31 +905,41 @@ def create_model(
     # Shutdown and startup cost for each generator, in the literature, these are 
     # often set to 0. However, in order to enforce the start-up and shut-down 
     # profiles, these costs cannot be zero here.
-    model.ShutdownCostCoefficient = Param(
-        model.ThermalGenerators,
-        within=NonNegativeReals,
-        initialize=network.df_gen.loc[i_thermal, 'SHUTDOWN'].to_dict(),
-    ) # units are $.
     model.StartupCostCoefficient = Param(
         model.ThermalGenerators, 
         within=NonNegativeReals,
-        initialize=network.df_gen.loc[i_thermal, 'STARTUP'].to_dict(),
+        initialize=network.dict_cost_startup_by_gen,
+    ) # units are $.
+    model.ShutdownCostCoefficient = Param(
+        model.ThermalGenerators,
+        within=NonNegativeReals,
+        initialize=network.dict_cost_shutdn_by_gen,
     ) # units are $.
 
     model.ReserveFactor = Param(
-        within=Reals, initialize=ReserveFactor, default=0.0, mutable=True
+        within=Reals, 
+        initialize=network.dict_reserve_margin['SPNUP'], 
+        default=0.0, 
+        mutable=True
     )
     model.RegulatingReserveFactor = Param(
-        within=Reals, initialize=RegulatingReserveFactor, default=0.0, mutable=True
+        within=Reals, 
+        initialize=network.dict_reserve_margin['REGUP'], 
+        default=0.0, 
+        mutable=True
     )
     model.SpinningReserveRequirement = Param(
         model.TimePeriods, 
-        within=NonNegativeReals, default=0.0, mutable=True,
+        within=NonNegativeReals, 
+        default=0.0, 
+        mutable=True,
         initialize=_reserve_requirement_rule
     )
     model.RegulatingReserveRequirement = Param(
         model.TimePeriods, 
-        within=NonNegativeReals, default=0.0, mutable=True,
+        within=NonNegativeReals, 
+        default=0.0, 
+        mutable=True,
         initialize=_regulating_requirement_rule
     )
 
@@ -1479,6 +1423,270 @@ def create_model(
 
     return model
 
+# The following is for pure test purpose
+################################################################################
+
+def build_118_network():
+    csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
+    csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
+    csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
+    csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
+    csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
+    csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
+    csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
+
+    df_bus              = pd.read_csv(csv_bus,               index_col=['BUS_ID'])
+    df_branch           = pd.read_csv(csv_branch,            index_col=['BR_ID'])
+    df_ptdf             = pd.read_csv(csv_ptdf,              index_col=0)
+    df_gen              = pd.read_csv(csv_gen,               index_col=0)
+    df_margcost         = pd.read_csv(csv_marginalcost,      index_col=0)
+    df_blockmargcost    = pd.read_csv(csv_blockmarginalcost, index_col=0)
+    df_blockoutputlimit = pd.read_csv(csv_blockoutputlimit,  index_col=0)
+
+    df_bus['VOLL'] = 9000
+    baseMVA = 100
+
+    # This is to fix a bug in the 118 bus system
+    if 'Hydro 31' in df_gen.index:
+        df_gen.drop('Hydro 31', inplace=True)
+    # Geo 01 is a thermal gen, set startup and shutdown costs to non-zero to 
+    # force UnitStartUp and UnitShutDn being intergers.
+    if 'Geo 01' in df_gen.index:
+        df_gen.at['Geo 01', 'STARTUP']  = 50
+        df_gen.at['Geo 01', 'SHUTDOWN'] = 50
+        # df_margcost.at['Geo 01', 'nlcost'] = 10
+        # df_margcost.at['Geo 01', '1']      = 10
+
+    # Add start-up and shut-down time in a quick and dirty way
+    df_gen.loc[:, 'STARTUP_TIME']  = df_gen.loc[:, 'MINIMUM_UP_TIME']
+    df_gen.loc[:, 'SHUTDOWN_TIME'] = df_gen.loc[:, 'MINIMUM_UP_TIME']
+    # df_gen.loc[df_gen['STARTUP_TIME']>=12,   'STARTUP_TIME']  = 12
+    # df_gen.loc[df_gen['SHUTDOWN_TIME']>=12, 'SHUTDOWN_TIME']  = 12
+
+     # AGC related parameters, need update
+    df_gen['AGC_MODE'] = 'RAW' # Possible options: NA, RAW, SMOOTH, CPS2
+    df_gen['DEAD_BAND'] = 5 # MW, 5 MW from FESTIV
+
+    # Now, build the network object for the UCED model
+    ############################################################################
+    network_118 = NewNetwork()
+    network_118.set_bus = set(df_bus.index.tolist())
+    network_118.dict_set_gens = dict()
+    network_118.dict_set_gens['ALL']        = set(df_gen.index)
+    network_118.dict_set_gens['THERMAL']    = set(df_gen[df_gen['GEN_TYPE']=='Thermal'].index)
+    network_118.dict_set_gens['NONTHERMAL'] = set(df_gen[~(df_gen['GEN_TYPE']=='Thermal')].index)
+    network_118.dict_set_gens['RENEWABLE']  = set(df_gen[df_gen['GEN_TYPE']=='Renewable'].index)
+    network_118.dict_set_gens['HYDRO']      = set(df_gen[df_gen['GEN_TYPE']=='Hydro'].index)
+    network_118.dict_set_gens['WIND']       = set([i for i in df_gen.index if i.startswith('Wind')])
+    network_118.dict_set_gens['THERMAL_slow'] = df_gen[
+        (df_gen['MINIMUM_UP_TIME'] > 1) & (df_gen['GEN_TYPE']=='Thermal')
+    ].index
+    network_118.dict_set_gens['THERMAL_fast'] = df_gen[
+        (df_gen['MINIMUM_UP_TIME'] <= 1) & (df_gen['GEN_TYPE']=='Thermal')
+    ].index
+
+    network_118.set_block = set(df_blockmargcost.columns)
+
+    network_118.set_branches = set(df_branch.index)
+    network_118.set_branches_enforced = network_118.set_branches
+
+    network_118.dict_genbus_by_gen = df_gen['GEN_BUS'].to_dict()
+
+    network_118.dict_block_size_by_gen_block = MyDataFrame(df_blockoutputlimit).to_dict_2d()
+    network_118.dict_block_cost_by_gen_block = MyDataFrame(df_blockmargcost).to_dict_2d()
+    network_118.dict_block_size0_by_gen = df_margcost['Pmax0'].to_dict()
+    network_118.dict_block_cost0_by_gen = df_margcost['nlcost'].to_dict()
+
+    network_118.dict_ptdf_by_br_bus = MyDataFrame(df_ptdf).to_dict_2d()
+    network_118.dict_busvoll_by_bus = df_bus[ df_bus['PD']>0 ][ 'VOLL' ].to_dict()
+
+    network_118.dict_linelimits_by_br = df_branch['RATE_A'].to_dict()
+
+    network_118.dict_pmin_by_gen         = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'PMIN'].to_dict()
+    network_118.dict_pmax_by_gen         = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'PMAX'].to_dict()
+    network_118.dict_rampup_by_gen       = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'RAMP_10'].to_dict() # MW/hr
+    network_118.dict_rampdn_by_gen       = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'RAMP_10'].to_dict() # MW/hr
+    network_118.dict_h_startup_by_gen    = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'STARTUP_TIME'].to_dict() # hr
+    network_118.dict_h_shutdn_by_gen     = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'SHUTDOWN_TIME'].to_dict() #hr
+    network_118.dict_h_minup_by_gen      = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'MINIMUM_UP_TIME'].to_dict() # hr
+    network_118.dict_h_mindn_by_gen      = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'MINIMUM_DOWN_TIME'].to_dict() # hr
+    network_118.dict_t_uniton_by_gen     = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'GEN_STATUS'].to_dict()
+    network_118.dict_cost_startup_by_gen = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'STARTUP'].to_dict()
+    network_118.dict_cost_shutdn_by_gen  = df_gen.loc[network_118.dict_set_gens['THERMAL'], 'SHUTDOWN'].to_dict()
+
+    network_118.dict_reserve_margin['REGUP'] = 0.05
+    network_118.dict_reserve_margin['REGDN'] = 0.05
+    network_118.dict_reserve_margin['SPNUP'] = 0.1
+
+    dfs = GroupDataFrame()
+    dfs.df_bus              = df_bus
+    dfs.df_branch           = df_branch
+    dfs.df_ptdf             = df_ptdf
+    dfs.df_gen              = df_gen
+    dfs.df_margcost         = df_margcost
+    dfs.df_blockmargcost    = df_blockmargcost
+    dfs.df_blockoutputlimit = df_blockoutputlimit
+
+    return dfs, network_118
+
+def build_texas_network():
+    csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
+    csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
+    csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
+    csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
+    csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
+    csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
+    csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
+
+    df_bus              = pd.read_csv(csv_bus,               index_col=['BUS_ID'])
+    df_branch           = pd.read_csv(csv_branch,            index_col=['BR_ID'])
+    df_ptdf             = pd.read_csv(csv_ptdf,              index_col=0)
+    df_gen              = pd.read_csv(csv_gen,               index_col=0)
+    df_margcost         = pd.read_csv(csv_marginalcost,      index_col=0)
+    df_blockmargcost    = pd.read_csv(csv_blockmarginalcost, index_col=0)
+    df_blockoutputlimit = pd.read_csv(csv_blockoutputlimit,  index_col=0)
+
+    df_bus['VOLL'] = 9000
+    baseMVA = 100
+
+    # Enforce the 230 kV limits
+    kv_level = 230
+    bus_kVlevel_set = set(df_bus[df_bus['BASEKV']>=kv_level].index)
+    set_branch_enforced = {
+        i for i in df_branch.index
+        if df_branch.loc[i,'F_BUS'] in bus_kVlevel_set 
+        and df_branch.loc[i,'T_BUS'] in bus_kVlevel_set
+    }
+    df_ptdf = df_ptdf.loc[set_branch_enforced,:].copy()
+
+    # Add start-up and shut-down time in a quick and dirty way
+    df_gen.loc[:, 'STARTUP_TIME']  = df_gen.loc[:, 'MINIMUM_UP_TIME']
+    df_gen.loc[:, 'SHUTDOWN_TIME'] = df_gen.loc[:, 'MINIMUM_UP_TIME']
+    # df_gen.loc[df_gen['STARTUP_TIME']>=12,   'STARTUP_TIME']  = 12
+    # df_gen.loc[df_gen['SHUTDOWN_TIME']>=12, 'SHUTDOWN_TIME']  = 12
+
+     # AGC related parameters, need update
+    df_gen['AGC_MODE'] = 'RAW' # Possible options: NA, RAW, SMOOTH, CPS2
+    df_gen['DEAD_BAND'] = 5 # MW, 5 MW from FESTIV
+
+    # Update start-up/shut-down times
+    for i, row in df_gen.iterrows():
+        cap    = df_gen.loc[i, 'PMAX']
+        s_cost = df_gen.loc[i, 'STARTUP']
+        tmin   = df_gen.loc[i, 'MINIMUM_UP_TIME']
+        t0     = df_gen.loc[i, 'GEN_STATUS']
+        if i.startswith('coal'):
+            if cap <= 300:
+                # Subcritical steam cycle
+                s_cost = 16.28*cap
+                tmin = 4 # Min on/offline time
+                t0 = tmin # Initial online time
+            else:
+                # Supercritical steam cycle
+                s_cost = 29.44*cap
+                tmin = 12
+                t0 = tmin
+        elif i.startswith('ng'):
+            if cap <= 50:
+                # Small aeroderivative turbines
+                s_cost = 8.23*cap
+                tmin = 1
+                t0 = tmin
+            elif cap <= 100:
+                # Small aeroderivative turbines
+                s_cost = 8.23*cap
+                tmin = 3
+                t0 = tmin
+            elif cap <= 450:
+                # Heavy-duty GT
+                s_cost = 1.70*cap
+                tmin = 5
+                t0 = tmin
+            else:
+                # CCGT
+                s_cost = 1.74*cap
+                tmin = 8
+                t0 = tmin
+        elif i.startswith('nuc'):
+            # Supercritical steam cycle
+            s_cost = 29.44*cap
+            tmin = 100
+            t0 = 1 # Nuclear units never go offline
+
+        df_gen.loc[i, 'STARTUP']  = s_cost
+        df_gen.loc[i, 'SHUTDOWN'] = s_cost
+        df_gen.loc[i, 'MINIMUM_UP_TIME']   = tmin
+        df_gen.loc[i, 'MINIMUM_DOWN_TIME'] = tmin
+        df_gen.loc[i, 'GEN_STATUS'] = t0 # All but nuclear units are free to be go offline
+
+    df_gen['STARTUP_RAMP']  = df_gen[['STARTUP_RAMP','PMIN']].max(axis=1)
+    df_gen['SHUTDOWN_RAMP'] = df_gen[['SHUTDOWN_RAMP','PMIN']].max(axis=1)
+
+    # Assume renewable sources cost nothing to start
+    df_gen.loc[df_gen['GEN_TYPE']=='Renewable', 'STARTUP'] = 0
+
+    # Now, build the network object for the UCED model
+    ############################################################################
+    network_texas = NewNetwork()
+    network_texas.set_bus = set(df_bus.index.tolist())
+    network_texas.dict_set_gens = dict()
+    network_texas.dict_set_gens['ALL']        = set(df_gen.index)
+    network_texas.dict_set_gens['THERMAL']    = set(df_gen[df_gen['GEN_TYPE']=='Thermal'].index)
+    network_texas.dict_set_gens['NONTHERMAL'] = set(df_gen[~(df_gen['GEN_TYPE']=='Thermal')].index)
+    network_texas.dict_set_gens['RENEWABLE']  = set(df_gen[df_gen['GEN_TYPE']=='Renewable'].index)
+    network_texas.dict_set_gens['HYDRO']      = set(df_gen[df_gen['GEN_TYPE']=='Hydro'].index)
+    network_texas.dict_set_gens['WIND']       = set([i for i in df_gen.index if i.startswith('wind')])
+    network_texas.dict_set_gens['THERMAL_slow'] = df_gen[
+        (df_gen['MINIMUM_UP_TIME'] > 1) & (df_gen['GEN_TYPE']=='Thermal')
+    ].index
+    network_texas.dict_set_gens['THERMAL_fast'] = df_gen[
+        (df_gen['MINIMUM_UP_TIME'] <= 1) & (df_gen['GEN_TYPE']=='Thermal')
+    ].index
+
+    network_texas.set_block = set(df_blockmargcost.columns)
+
+    network_texas.set_branches = set(df_branch.index)
+    network_texas.set_branches_enforced = set_branch_enforced
+
+    network_texas.dict_genbus_by_gen = df_gen['GEN_BUS'].to_dict()
+
+    network_texas.dict_block_size_by_gen_block = MyDataFrame(df_blockoutputlimit).to_dict_2d()
+    network_texas.dict_block_cost_by_gen_block = MyDataFrame(df_blockmargcost).to_dict_2d()
+    network_texas.dict_block_size0_by_gen = df_margcost['Pmax0'].to_dict()
+    network_texas.dict_block_cost0_by_gen = df_margcost['nlcost'].to_dict()
+
+    network_texas.dict_ptdf_by_br_bus = MyDataFrame(df_ptdf).to_dict_2d()
+    network_texas.dict_busvoll_by_bus = df_bus[ df_bus['PD']>0 ][ 'VOLL' ].to_dict()
+
+    network_texas.dict_linelimits_by_br = df_branch['RATE_A'].to_dict()
+
+    network_texas.dict_pmin_by_gen         = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'PMIN'].to_dict()
+    network_texas.dict_pmax_by_gen         = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'PMAX'].to_dict()
+    network_texas.dict_rampup_by_gen       = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'RAMP_10'].to_dict() # MW/hr
+    network_texas.dict_rampdn_by_gen       = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'RAMP_10'].to_dict() # MW/hr
+    network_texas.dict_h_startup_by_gen    = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'STARTUP_TIME'].to_dict() # hr
+    network_texas.dict_h_shutdn_by_gen     = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'SHUTDOWN_TIME'].to_dict() #hr
+    network_texas.dict_h_minup_by_gen      = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'MINIMUM_UP_TIME'].to_dict() # hr
+    network_texas.dict_h_mindn_by_gen      = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'MINIMUM_DOWN_TIME'].to_dict() # hr
+    network_texas.dict_t_uniton_by_gen     = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'GEN_STATUS'].to_dict()
+    network_texas.dict_cost_startup_by_gen = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'STARTUP'].to_dict()
+    network_texas.dict_cost_shutdn_by_gen  = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'SHUTDOWN'].to_dict()
+
+    network_texas.dict_reserve_margin['REGUP'] = 0.05
+    network_texas.dict_reserve_margin['REGDN'] = 0.05
+    network_texas.dict_reserve_margin['SPNUP'] = 0.1
+
+    dfs = GroupDataFrame()
+    dfs.df_bus              = df_bus
+    dfs.df_branch           = df_branch
+    dfs.df_ptdf             = df_ptdf
+    dfs.df_gen              = df_gen
+    dfs.df_margcost         = df_margcost
+    dfs.df_blockmargcost    = df_blockmargcost
+    dfs.df_blockoutputlimit = df_blockoutputlimit
+
+    return dfs, network_texas
+
 def test_dauc(casename):
     t0 = time()
     content = ''
@@ -1499,15 +1707,14 @@ def test_dauc(casename):
                 df_timesequence.loc[index, 't5'] = index
     df_timesequence = df_timesequence.astype('int')
 
+    # Initial conditions
+    dict_UnitOnT0State = dict()
+    dict_PowerGeneratedT0 = dict()
+
     if casename == '118':
-        # 118 bus system
-        csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
-        csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/branch.csv'
-        csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ptdf.csv'
-        csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator_data_plexos_withRT.csv'
-        csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/118bus/marginalcost.csv'
-        csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockmarginalcost.csv'
-        csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/118bus/blockoutputlimit.csv'
+        dfs, network = build_118_network()
+
+        # Prepare day-ahead UC data
         csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
         csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
         csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
@@ -1516,123 +1723,35 @@ def test_dauc(casename):
         csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ed_generator.csv'
         csv_busload_agc       = '/home/bxl180002/git/FlexibleRampSCUC/118bus/agc_loads.csv'
         csv_genfor_agc        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/agc_generator.csv'
-    elif casename == 'TX':
-        # Texas 2000 system
-        csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
-        csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
-        csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
-        csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
-        csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
-        csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
-        csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
-        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
-        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
-        csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_load.csv'
-        csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_generator.csv'
-        csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_load.csv'
-        csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_generator.csv'
 
+        df_busload = pd.read_csv(csv_busload, index_col=0)
+        df_genfor  = pd.read_csv(csv_genfor, index_col=0)
+        df_busload = MyDataFrame(df_busload.loc[:, df_busload.columns.difference(['LOAD'])])
+        df_genfor  = MyDataFrame(df_genfor)
+        df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
+        df_genfor_nonthermal = df_genfor.loc[:, network.dict_set_gens['NONTHERMAL']]
+        df_genfor_nonthermal.fillna(0, inplace=True)
 
-    # Build network object, will moved to case specific initiation functions, 
-    # we need to make sure that the network object contains exactly what we need
-    # in the model, no more, no less
-    network = Network(csv_bus, csv_branch, csv_ptdf, csv_gen, csv_marginalcost, csv_blockmarginalcost, csv_blockoutputlimit)
-    network.df_bus['VOLL'] = 9000
-    network.baseMVA = 100
-
-    # This is for the Texas system
-    if casename=='TX':
-        network.enforce_kv_level(230)
-
-    # This is for 118 bus system
-    # # This is to fix a bug in the 118 bus system
-    if 'Hydro 31' in network.df_gen.index:
-        network.df_gen.drop('Hydro 31', inplace=True)
-    # Geo 01 is a thermal gen, set startup and shutdown costs to non-zero to 
-    # force UnitStartUp and UnitShutDn being intergers.
-    if 'Geo 01' in network.df_gen.index:
-        network.df_gen.at['Geo 01', 'STARTUP']  = 50
-        network.df_gen.at['Geo 01', 'SHUTDOWN'] = 50
-        # network.df_margcost.at['Geo 01', 'nlcost'] = 10
-        # network.df_margcost.at['Geo 01', '1']      = 10
-
-    # Add start-up and shut-down time in a quick and dirty way
-    network.df_gen.loc[:, 'STARTUP_TIME']  = network.df_gen.loc[:, 'MINIMUM_UP_TIME']
-    network.df_gen.loc[:, 'SHUTDOWN_TIME'] = network.df_gen.loc[:, 'MINIMUM_UP_TIME']
-    # network.df_gen.loc[network.df_gen['STARTUP_TIME']>=12,   'STARTUP_TIME']  = 12
-    # network.df_gen.loc[network.df_gen['SHUTDOWN_TIME']>=12, 'SHUTDOWN_TIME']  = 12
-
-    # Build network object, will moved to case specific initiation functions
-    network.dict_gens = dict()
-    network.dict_gens['ALL'] = network.df_gen.index.tolist()
-    for t in network.df_gen['GEN_TYPE'].unique():
-        network.dict_gens[t] = network.df_gen.loc[network.df_gen['GEN_TYPE']==t, 'GEN_TYPE'].index.tolist()
-    network.dict_gens['Non thermal'] = network.df_gen.index.difference(
-        network.df_gen.loc[network.df_gen['GEN_TYPE']=='Thermal', 'GEN_TYPE'].index
-    ).tolist()
-    network.dict_gens['Thermal_slow'] = network.df_gen[
-        (network.df_gen['MINIMUM_UP_TIME'] > 1) 
-        & 
-        (network.df_gen['GEN_TYPE']=='Thermal')
-    ].index
-    network.dict_gens['Thermal_fast'] = network.df_gen[
-        (network.df_gen['MINIMUM_UP_TIME'] <= 1) 
-        & 
-        (network.df_gen['GEN_TYPE']=='Thermal')
-    ].index
-
-    # Bus-generator matrix
-    network.ls_bus = network.df_ptdf.columns.tolist()
-    network.mat_busgen=np.zeros([len(network.ls_bus), len(network.dict_gens['ALL'])])
-    dict_genbus = network.df_gen['GEN_BUS'].to_dict()
-    for g, b in dict_genbus.iteritems():
-        i = network.ls_bus.index(b)
-        j = network.dict_gens['ALL'].index(g)
-        network.mat_busgen[i, j] = 1
-    df_tmp = pd.DataFrame(0, index=network.ls_bus, columns=network.dict_gens['ALL'])
-    for g, b in dict_genbus.iteritems():
-        df_tmp.loc[b, g] = 1 # This provides an alternative choice other than network.mat_busgen, should compare their performance later
-    # AGC related parameters, need update
-    network.df_gen['AGC_MODE'] = 'RAW' # Possible options: NA, RAW, SMOOTH, CPS2
-    network.df_gen['DEAD_BAND'] = 5 # MW, 5 MW from FESTIV
-
-    # Prepare day-ahead UC data
-    df_busload = pd.read_csv(csv_busload, index_col=0)
-    df_genfor  = pd.read_csv(csv_genfor, index_col=0)
-    df_busload = MyDataFrame(df_busload.loc[:, df_busload.columns.difference(['LOAD'])])
-    df_genfor  = MyDataFrame(df_genfor)
-    df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
-    df_genfor_nonthermal = df_genfor.loc[:, network.df_gen[network.df_gen['GEN_TYPE']!='Thermal'].index]
-    df_genfor_nonthermal.fillna(0, inplace=True)
-
-    # Reserve margins, will be move to case specific data
-    ReserveFactor = 0.1
-    RegulatingReserveFactor = 0.05
-
-    # Test purpose
-    ############################################################################
-    if casename == '118':
-        dict_UnitOnT0State = dict()
-        dict_PowerGeneratedT0 = dict()
+        # For debugging
 
         # Control initial conditions
         ########################################################################
         # All units are off
-        for g in network.dict_gens['ALL']:
-            dict_PowerGeneratedT0[g] = 0
-            if g in network.dict_gens['Thermal']:
-                dict_UnitOnT0State[g]    = -12
+        # for g in network.dict_set_gens['ALL']:
+        #     dict_PowerGeneratedT0[g] = 0
+        #     if g in network.dict_set_gens['THERMAL']:
+        #         dict_UnitOnT0State[g]    = -12
 
         # All units are on and at minimum generation levels
-        # for g in network.dict_gens['ALL']:
-        #     dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMIN']
-        #     if g in network.dict_gens['Thermal']:
-        #         dict_UnitOnT0State[g]    = 12
+        for g in network.dict_set_gens['ALL']:
+            dict_PowerGeneratedT0[g] = dfs.df_gen.at[g, 'PMIN']
+            if g in network.dict_set_gens['THERMAL']:
+                dict_UnitOnT0State[g]    = 12
 
         # All units are on and at maximum generation levels
-        # for g in network.dict_gens['ALL']:
-        #     dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMAX']
-        #     if g in network.dict_gens['Thermal']:
+        # for g in network.dict_set_gens['ALL']:
+        #     dict_PowerGeneratedT0[g] = dfs.df_gen.at[g, 'PMAX']
+        #     if g in network.dict_set_gens['THERMAL']:
         #         dict_UnitOnT0State[g]    = 12
         ########################################################################
 
@@ -1673,11 +1792,36 @@ def test_dauc(casename):
         ########################################################################
 
     elif casename == 'TX':
-        dict_UnitOnT0State = dict()
-        dict_PowerGeneratedT0 = dict()
-        for g in network.dict_gens['Thermal']:
-            dict_UnitOnT0State[g]    = 12
-            dict_PowerGeneratedT0[g] = network.df_gen.at[g, 'PMIN']
+        # Texas 2000 system
+
+        dfs, network = build_texas_network()
+
+        csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
+        csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
+        csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
+        csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
+        csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
+        csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
+        csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
+        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
+        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
+        csv_busload_ha        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_load.csv'
+        csv_genfor_ha         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_generator.csv'
+        csv_busload_ed        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_load.csv'
+        csv_genfor_ed         = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_generator.csv'
+
+        df_busload = pd.read_csv(csv_busload, index_col=0)
+        df_genfor  = pd.read_csv(csv_genfor, index_col=0)
+        df_busload = MyDataFrame(df_busload.loc[:, df_busload.columns.difference(['LOAD'])])
+        df_genfor  = MyDataFrame(df_genfor)
+        df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
+        df_genfor_nonthermal = df_genfor.loc[:, network.dict_set_gens['NONTHERMAL']]
+        df_genfor_nonthermal.fillna(0, inplace=True)
+
+        for g in network.dict_set_gens['ALL']:
+            dict_PowerGeneratedT0[g] = dfs.df_gen.at[g, 'PMIN']
+            if g in network.dict_set_gens['THERMAL']:
+                dict_UnitOnT0State[g]    = 12
     ############################################################################
 
     ############################################################################
@@ -1686,8 +1830,6 @@ def test_dauc(casename):
         network,
         df_busload,
         df_genfor_nonthermal,
-        ReserveFactor,
-        RegulatingReserveFactor,
         nI=1,
         dict_UnitOnT0State=dict_UnitOnT0State,
         dict_PowerGeneratedT0=dict_PowerGeneratedT0,
@@ -1817,7 +1959,6 @@ def test_dauc(casename):
     #     if i%9 == 8:
     #         plt.show()
 
-if __name__ == "__main__":
-    casename = '118' # Options: '118' and 'TX'
-    test_dauc(casename)
-    # test_old_model()
+if __name__ == '__main__':
+    test_dauc('TX')
+
