@@ -9,8 +9,6 @@ from email.mime.text import MIMEText
 from numpy import sign
 from matplotlib import pyplot as plt
 from IPython import embed as IP
-from SCUC_RampConstraint_3 import create_model, da_input, Network, MyDataFrame
-from economic_dispatch import *
 
 def send_mail(to_list, sub, content, mail_pass):  
     # For help go to the following link:
@@ -120,8 +118,9 @@ def examine_load():
 
     IP()
 
-
-if __name__ == "__main__":
+def sequential_run_old():
+    from SCUC_RampConstraint_3 import create_model, da_input, Network, MyDataFrame
+    from SCED_RampConstraint_3.py import *
     t0 = time()
     content = ''
 
@@ -1003,3 +1002,11 @@ if __name__ == "__main__":
                 print "Email sent failed."
 
     IP()
+
+def sequential_run_new():
+    pass
+
+
+if __name__ == "__main__":
+    # sequential_run_old()
+    sequential_run_new()

@@ -10,7 +10,6 @@ from numpy import sign
 from matplotlib import pyplot as plt
 from IPython import embed as IP
 from SCUC_RampConstraint_3 import create_model, da_input, Network, MyDataFrame
-from economic_dispatch import *
 
 # model = create_model()
 
