@@ -687,6 +687,8 @@ def create_model(
     dict_uniton_da=None, # Slow units commitment statuses from DAUC model
     ##############################
     dict_DispatchLimitsUpper=None, # Only apply for slow units
+    ##############################
+    binary_mode=True, # This switch forces gen start-up/shut-down indicator to be binary, can be relaxed to improve time performance
 ):
     model = ConcreteModel()
     model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
@@ -1000,15 +1002,15 @@ def create_model(
     model.UnitStartUp = Var(
         model.ThermalGenerators,
         model.TimePeriods,
-        bounds=(0, 1),
-        within=NonNegativeReals, 
+        bounds=None if binary_mode else (0, 1),
+        within=Binary if binary_mode else NonNegativeReals,
         initialize=0
     )
     model.UnitShutDn = Var(
         model.ThermalGenerators,
         model.TimePeriods,
-        bounds=(0, 1),
-        within=NonNegativeReals, 
+        bounds=None if binary_mode else (0, 1),
+        within=Binary if binary_mode else NonNegativeReals,
         initialize=0
     )
 
