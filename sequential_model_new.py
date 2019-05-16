@@ -737,7 +737,7 @@ def test_dauc(casename, showing_gens='problematic'):
     #         [value(instance.MinimumPowerOutput[g])]*25,
     #         'r',
     #     )
-    #     ax.set_title( g + ', Tsd = {:>g}'.format(value(instance.ShutdownTime[g])))
+    #     ax.set_title( g + ', Tsd = {:>g}'.format(value(instance.ShutdownHour[g])))
     #     if i%9 == 8:
     #         plt.show()
     #     elif i == len(ls_gens) - 1:
