@@ -686,7 +686,8 @@ def create_model(
     dict_PowerGeneratedT0=None, # Initial power generation level at T0 from last RTUC model
     dict_uniton_da=None, # Slow units commitment statuses from DAUC model
     ##############################
-    dict_DispatchLimitsUpper=None, # Only apply for slow units
+    dict_DispatchLimitsLower=None, # Only apply for committed units
+    dict_DispatchLimitsUpper=None, # Only apply for committed units, keys should be the same as dict_DispatchLimitsLower
     ##############################
     binary_mode=True, # This switch forces gen start-up/shut-down indicator to be binary, can be relaxed to improve time performance
 ):
