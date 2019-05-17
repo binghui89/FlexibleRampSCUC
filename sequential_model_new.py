@@ -10,6 +10,207 @@ from matplotlib import pyplot as plt
 from IPython import embed as IP
 from unit_commitment import GroupDataFrame, MyDataFrame, NewNetwork, create_model
 
+def return_downscaled_initial_condition(instance, nI_DAC, nI_RTC):
+    '''
+    Calculate upper and lower dispatch limits based on the given solved Pyomo instance.
+    '''
+
+    nI_RTCperDAC = nI_RTC/nI_DAC # Number of RTC intervals per DAC interval, must be integer
+
+    # Time index of the longer and shorter time scales
+    tindex_DAC = np.array(instance.TimePeriods.value)
+    tindex_RTC = np.arange(
+        (tindex_DAC[0]-1)*nI_RTCperDAC+1, # Index of the starting interval of shorter time scale
+        tindex_DAC[-1]*nI_RTCperDAC+1,  # Index of the ending interval of shorter time scale, plus 1 because numpy excludes the last number.
+        1
+    )
+    t0_DAC = tindex_DAC[0] - 1
+    t0_RTC = tindex_RTC[0] - 1
+    ls_gen_therm = list(instance.ThermalGenerators.value)
+    nG_therm = len(ls_gen_therm)
+
+    # Results container
+    df_POWER_START_DAC   = pd.DataFrame(np.nan, index=tindex_DAC, columns=instance.AllGenerators)
+    df_POWER_END_DAC     = pd.DataFrame(np.nan, index=tindex_DAC, columns=instance.AllGenerators)
+    df_UNITON_DAC        = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_UNITSTUP_DAC      = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_UNITSTDN_DAC      = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_SIGMAUP_DAC       = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_SIGMADN_DAC       = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_SIGMAPOWERUP_DAC  = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_SIGMAPOWERDN_DAC  = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_REGUP_DAC         = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_REGDN_DAC         = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_SPNUP_DAC         = pd.DataFrame(np.nan, index=tindex_DAC, columns=ls_gen_therm)
+    df_UNITONT0_DAC      = pd.DataFrame(np.nan, index=[t0_DAC], columns=ls_gen_therm)
+    df_SIGMADNT0_DAC     = pd.DataFrame(0,      index=[t0_DAC], columns=ls_gen_therm)
+    for g in instance.AllGenerators:
+        for t in tindex_DAC:
+            df_POWER_END_DAC.at[t, g] = value(instance.PowerGenerated[g, t])
+            if t == tindex_DAC[0]:
+                df_POWER_START_DAC.at[t, g] = value(instance.PowerGeneratedT0[g])
+            else:
+                df_POWER_START_DAC.at[t, g] = value(instance.PowerGenerated[g, t-1])
+    for g in ls_gen_therm:
+        df_UNITONT0_DAC.at[t0_DAC, g] = value(instance.UnitOnT0[g])
+        if g in instance.SigmaDnT0:
+            df_SIGMADNT0_DAC.at[t0_DAC, g] = value(instance.SigmaDnT0[g])
+        for t in tindex_DAC:
+            df_UNITON_DAC.at[t, g]       = value(instance.UnitOn[g, t])
+            df_UNITSTUP_DAC.at[t, g]     = value(instance.UnitStartUp[g, t])
+            df_UNITSTDN_DAC.at[t, g]     = value(instance.UnitShutDn[g, t])
+            df_SIGMAUP_DAC.at[t, g]      = value(instance.SigmaUp[g, t])
+            df_SIGMADN_DAC.at[t, g]      = value(instance.SigmaDn[g, t])
+            df_SIGMAPOWERUP_DAC.at[t, g] = value(instance.SigmaPowerTimesUp[g, t])
+            df_SIGMAPOWERDN_DAC.at[t, g] = value(instance.SigmaPowerTimesDn[g, t])
+            df_REGUP_DAC.at[t, g]        = value(instance.RegulatingReserveUpAvailable[g, t])
+            df_REGDN_DAC.at[t, g]        = value(instance.RegulatingReserveDnAvailable[g, t])
+            df_SPNUP_DAC.at[t, g]        = value(instance.SpinningReserveUpAvailable[g, t])
+
+    # Calculate unit start-up/shut-down binary indicator
+    # df_unitonaug = pd.concat(
+    #     [df_UNITONT0_DAC[df_UNITON_DAC.columns], df_UNITON_DAC[df_UNITON_DAC.columns]], 
+    #     axis=0
+    # ) # Augmented df_uniton
+    # df_UNITSTUP_DAC = pd.DataFrame(
+    #     np.maximum(df_unitonaug.loc[1:, :].values - df_unitonaug.iloc[0:-1, :].values, 0),
+    #     index=df_UNITON_DAC.index,
+    #     columns=df_unitonaug.columns,
+    # ).astype(int)
+    # df_UNITSTDN_DAC = pd.DataFrame(
+    #     np.maximum(df_unitonaug.iloc[0:-1, :].values - df_unitonaug.loc[1:, :].values, 0),
+    #     index=df_UNITON_DAC.index,
+    #     columns=df_unitonaug.columns,
+    # ).astype(int)
+
+    # NOTE: np array's index starts from 0
+    ar_UNITSTUP_DAC2RTC = np.zeros((tindex_RTC.size, nG_therm), dtype=int)
+    ar_UNITSTDN_DAC2RTC = np.zeros((tindex_RTC.size, nG_therm), dtype=int)
+    ar_UNITSTUP_DAC2RTC[(tindex_DAC-1)*nI_RTCperDAC, :] = df_UNITSTUP_DAC.values
+    ar_UNITSTDN_DAC2RTC[tindex_DAC*nI_RTCperDAC-1, :]   = df_UNITSTDN_DAC.values
+
+    ar_UNITON_DAC2RTC = (df_UNITON_DAC+df_UNITSTDN_DAC).values.astype(int).repeat(nI_RTCperDAC, axis=0) - ar_UNITSTDN_DAC2RTC
+
+    ar_SIGMAUP_DAC2RTC = df_SIGMAUP_DAC.astype(int).values.repeat(nI_RTCperDAC, axis=0)
+    ar_SIGMADN_DAC2RTC = np.concatenate(
+        [df_SIGMADNT0_DAC.values, df_SIGMADN_DAC.values], 
+        axis=0
+    ).repeat(nI_RTCperDAC, axis=0)[1:tindex_RTC.size+1, :]
+
+    # Binary indicator of a unit is up, starting-up, or  shuttind-down. 
+    # A unit is up if power >= Pmin, this means nominal ramp rate applies in this interval.
+    # A unit is starting up if power < Pmin and it is ramping up at its start-up ramp rate.
+    # A unit is shutting down if power < Pmin and it is ramping down at its shut-down ramp rate.
+    # Note the differences: 
+    # ar_is_up_DAC2RTC           <--> ar_UNITON_DAC2RTC
+    # ar_is_startingup_DAC2RTC   <--> ar_SIGMAUP_DAC2RTC
+    # ar_is_shuttingdown_DAC2RTC <--> ar_SIGMADN_DAC2RTC
+    # A unit's status can only be one of the following exclusively:
+    # (1) up, (2) starting-up, (3) shutting-down or (4) offline, so the 
+    # following equation always holds: 
+    # ar_is_up_DAC2RTC + ar_is_startingup_DAC2RTC + ar_is_shuttingdown_DAC2RTC <= 1
+    ar_is_startingup_DAC2RTC   = ar_SIGMAUP_DAC2RTC
+    ar_is_shuttingdown_DAC2RTC = np.concatenate([df_SIGMADNT0_DAC.values, ar_SIGMADN_DAC2RTC], axis=0)[0:-1]
+    ar_is_up_DAC2RTC = np.maximum(
+        0,
+        ar_UNITON_DAC2RTC + ar_UNITSTDN_DAC2RTC 
+        - ar_is_startingup_DAC2RTC 
+        - ar_is_shuttingdown_DAC2RTC
+    )
+
+    # All ramp rate units are in MW/interval
+    ar_ramp_dn_RTC = np.array([value(instance.RampDownLimitPerHour[g]) for g in ls_gen_therm])/nI_RTC
+    ar_pmin        = np.array([value(instance.MinimumPowerOutput[g]) for g in ls_gen_therm])
+    ar_pmax        = np.array([value(instance.MaximumPowerOutput[g]) for g in ls_gen_therm])
+    ar_p_aug = np.concatenate(
+        [
+            df_POWER_START_DAC[ls_gen_therm].values[0,:].reshape(1, nG_therm),
+            df_POWER_END_DAC[ls_gen_therm].values
+        ],
+        axis=0
+    ) # Arrary of power generation from DAUC, including initial power level P0 in the first row
+
+    # Power generation levels at the end of all time intervals are interpolated 
+    # from longer time scale into shorter time scale.
+    # We need to normlize the time index of both the longer and shorter time 
+    # scales such that both start from 0 (time index 0, or the initial interval) 
+    # and end at 1 (the last interval).
+    ar_POWER_END_DAC = np.empty((tindex_RTC.size, nG_therm))
+    tindex_RTC_normalized = (tindex_RTC.astype(float) - t0_RTC)/(tindex_RTC[-1] - t0_RTC)
+    tindex_DAC_full_normalized = (np.concatenate([[t0_DAC], tindex_DAC]).astype(float) - t0_DAC)/(tindex_DAC[-1] - t0_DAC)
+    for i in np.arange(ar_p_aug.shape[1]):
+        ar_POWER_END_DAC[:, i] = np.interp(
+            tindex_RTC_normalized,
+            tindex_DAC_full_normalized, # This is a sequence from 0 to 1.
+            ar_p_aug[:, i]
+        )
+
+    # Upper and lower dispatch limits
+    ar_dispatch_max_RTC = np.empty((df_UNITSTUP_DAC.shape[0]*nI_RTCperDAC, df_UNITSTUP_DAC.shape[1]))
+    ar_dispatch_min_RTC = np.empty((df_UNITSTUP_DAC.shape[0]*nI_RTCperDAC, df_UNITSTUP_DAC.shape[1]))
+
+    for i in np.arange(df_UNITSTUP_DAC.shape[0]*nI_RTCperDAC-1, -1, -1):
+        if i == df_UNITSTUP_DAC.shape[0]*nI_RTCperDAC-1:
+            ar_dispatch_max_RTC[i, :] = (
+                ar_pmax*ar_is_up_DAC2RTC[-1, :] 
+                + (
+                    ar_is_startingup_DAC2RTC[-1, :] 
+                    + ar_is_shuttingdown_DAC2RTC[-1, :]
+                )*ar_POWER_END_DAC[-1, :]
+            )
+            ar_dispatch_min_RTC[i, :] = (
+                ar_pmin*ar_is_up_DAC2RTC[-1, :] 
+                + (
+                    ar_is_startingup_DAC2RTC[-1, :] 
+                    + ar_is_shuttingdown_DAC2RTC[-1, :]
+                )*ar_POWER_END_DAC[-1, :]
+            )
+        else:
+            i_next = i+1
+            tmp = ar_is_up_DAC2RTC[i, :]*ar_is_up_DAC2RTC[i_next, :]
+            ar_dispatch_max_RTC[i, :] = np.minimum(
+                ar_pmax, 
+                tmp*(ar_dispatch_max_RTC[i_next, :] + ar_ramp_dn_RTC) +
+                (1-tmp)*ar_POWER_END_DAC[i, :]
+            )
+            ar_dispatch_min_RTC[i, :] = np.minimum(
+                ar_pmin, 
+                ar_dispatch_max_RTC[i, :]
+            )
+
+    df_UNITON_DAC2RTC = pd.DataFrame(
+        ar_UNITON_DAC2RTC,
+        index=tindex_RTC, 
+        columns=ls_gen_therm,
+    )
+    df_UNITSTUP_DAC2RTC = pd.DataFrame(
+        ar_UNITSTUP_DAC2RTC,
+        index=tindex_RTC, 
+        columns=ls_gen_therm,
+    )
+    df_UNITSTDN_DAC2RTC = pd.DataFrame(
+        ar_UNITSTDN_DAC2RTC,
+        index=tindex_RTC, 
+        columns=ls_gen_therm,
+    )
+    df_dispatch_max_RTC = pd.DataFrame(
+        ar_dispatch_max_RTC,
+        index=tindex_RTC, 
+        columns=ls_gen_therm,
+    )
+    df_dispatch_min_RTC = pd.DataFrame(
+        ar_dispatch_min_RTC,
+        index=tindex_RTC, 
+        columns=ls_gen_therm,
+    )
+
+    df_result = GroupDataFrame()
+    df_result.df_uniton = df_UNITON_DAC2RTC
+    df_result.df_unitstup = df_UNITSTUP_DAC2RTC
+    df_result.df_unitstdn = df_UNITSTDN_DAC2RTC
+    df_result.df_dispatch_min = df_dispatch_min_RTC
+    df_result.df_dispatch_max = df_dispatch_max_RTC
+    return df_result
 
 def build_118_network():
     csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/118bus/bus.csv'
@@ -276,8 +477,8 @@ def test_dauc(casename, showing_gens='problematic'):
     t0 = time()
     content = ''
 
-    nI_DAC = 1 # Number of DAUC intervals in an hour
-    nI_RTC = 4 # Number of RTUC intervals in an hour
+    nI_DAC = 1  # Number of DAUC intervals in an hour
+    nI_RTC = 4  # Number of RTUC intervals in an hour
     nI_RTD = 12 # Number of RTED intervals in an hour
     nI_AGC = 3600/6 # Number of AGC intervals in an hour
 
@@ -781,19 +982,7 @@ def test_dauc(casename, showing_gens='problematic'):
         ).to_dict_2d()
 
         # Create RTUC model
-        # ins_ha = create_model(
-        #     network,
-        #     df_busload_ha.loc[t_start: t_end, :],
-        #     df_genfor_ha.loc[t_start: t_end, :],
-        #     ReserveFactor,
-        #     RegulatingReserveFactor,
-        #     nI_ha,
-        #     dict_UnitOnT0State, 
-        #     dict_PowerGeneratedT0,
-        #     dict_uniton_ha,
-        #     dict_DispacthLimitsUpper_slow
-        # )
-        ins_ha = create_model(
+        ins_RTC = create_model(
             network,
             df_busload_RTC.loc[t_start: t_end, :], # Only bus load, first dimension time starts from 1, no total load
             df_genfor_RTC.loc[t_start: t_end, :], # Only generation from nonthermal gens, first dim time starts from 1
@@ -814,7 +1003,7 @@ def test_dauc(casename, showing_gens='problematic'):
 
         # Solve RTUC model
         try:
-            results = optimizer.solve(ins_ha)
+            results = optimizer.solve(ins_RTC)
         except:
             print 'Cannot solve RTUC model!'
             IP()
@@ -822,7 +1011,6 @@ def test_dauc(casename, showing_gens='problematic'):
         if results.solver.termination_condition == TerminationCondition.infeasible:
             print 'Infeasibility detected in the RTUC model!'
             IP()
-
 
 if __name__ == '__main__':
     test_dauc('118')
