@@ -683,6 +683,21 @@ def test_dauc(casename, showing_gens='problematic'):
                 ar_dispatch_max_RTC[i, :]
             )
 
+    df_UNITON_DAC2RTC = pd.DataFrame(
+        ar_UNITON_DAC2RTC,
+        index=df_busload_RTC.index, 
+        columns=df_UNITON_DAC.columns,
+    )
+    df_UNITSTUP_DAC2RTC = pd.DataFrame(
+        ar_UNITSTUP_DAC2RTC,
+        index=df_busload_RTC.index, 
+        columns=df_UNITON_DAC.columns,
+    )
+    df_UNITSTDN_DAC2RTC = pd.DataFrame(
+        ar_UNITSTDN_DAC2RTC,
+        index=df_busload_RTC.index, 
+        columns=df_UNITON_DAC.columns,
+    )
     df_dispatch_max_RTC = pd.DataFrame(
         ar_dispatch_max_RTC,
         index=df_busload_RTC.index, 
@@ -743,9 +758,71 @@ def test_dauc(casename, showing_gens='problematic'):
     #     elif i == len(ls_gens) - 1:
     #         plt.show()
 
-
-
     IP()
+
+    for i_rtuc in range(1, 2):
+        t_start = i_rtuc # 4*(i_rtuc-1) + 1
+        t_end   = i_rtuc + 3 # 4*i_rtuc
+
+        dict_uniton_slow = MyDataFrame(
+            df_UNITON_DAC2RTC.loc[t_start: t_end, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_UnitStartUp_slow = MyDataFrame(
+            df_UNITSTUP_DAC2RTC.loc[t_start: t_end, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_UnitShutDn_slow = MyDataFrame(
+            df_UNITSTDN_DAC2RTC.loc[t_start: t_end, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_DispacthLimitsUpper_slow = MyDataFrame(
+            df_dispatch_max_RTC.loc[t_start: t_end, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_DispacthLimitsLower_slow = MyDataFrame(
+            df_dispatch_min_RTC.loc[t_start: t_end, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+
+        # Create RTUC model
+        # ins_ha = create_model(
+        #     network,
+        #     df_busload_ha.loc[t_start: t_end, :],
+        #     df_genfor_ha.loc[t_start: t_end, :],
+        #     ReserveFactor,
+        #     RegulatingReserveFactor,
+        #     nI_ha,
+        #     dict_UnitOnT0State, 
+        #     dict_PowerGeneratedT0,
+        #     dict_uniton_ha,
+        #     dict_DispacthLimitsUpper_slow
+        # )
+        ins_ha = create_model(
+            network,
+            df_busload_RTC.loc[t_start: t_end, :], # Only bus load, first dimension time starts from 1, no total load
+            df_genfor_RTC.loc[t_start: t_end, :], # Only generation from nonthermal gens, first dim time starts from 1
+            nI_RTC, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
+            dict_UnitOnT0State=dict_UnitOnT0State, # How many time periods the units have been on at T0 from last RTUC model
+            dict_PowerGeneratedT0=dict_PowerGeneratedT0, # Initial power generation level at T0 from last RTUC model
+            ##############################
+            dict_UnitOn=dict_uniton_slow, # Committment statuses of committed units
+            dict_UnitStartUp=dict_UnitStartUp_slow, # Startup indicator, keys should be the same as dict_UnitOn
+            dict_UnitShutDn=dict_UnitShutDn_slow, # Shutdown indicator, keys should be the same as dict_UnitOn
+            dict_DispatchLimitsLower=dict_DispacthLimitsLower_slow, # Only apply for committed units, keys should be the same as dict_UnitOn
+            dict_DispatchLimitsUpper=dict_DispacthLimitsUpper_slow, # Only apply for committed units, keys should be the same as dict_UnitOn
+        )
+        msg = "RTUC Model {} created!".format(i_rtuc)
+        print msg
+        content += msg
+        content += '\n'
+
+        # Solve RTUC model
+        try:
+            results = optimizer.solve(ins_ha)
+        except:
+            print 'Cannot solve RTUC model!'
+            IP()
+
+        if results.solver.termination_condition == TerminationCondition.infeasible:
+            print 'Infeasibility detected in the RTUC model!'
+            IP()
+
 
 if __name__ == '__main__':
     test_dauc('118')

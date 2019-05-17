@@ -721,7 +721,7 @@ def create_model(
         unzipped_keys = zip(*dict_UnitOn.keys())
     model.ThermalGenerators_commit = Set(
         within=model.ThermalGenerators,
-        initialize=set(unzipped_keys[1]) if dict_UnitOn else set(),
+        initialize=set(unzipped_keys[0]) if dict_UnitOn else set(),
     )
     model.ThermalGenerators_uncommit = model.ThermalGenerators - model.ThermalGenerators_commit
 
