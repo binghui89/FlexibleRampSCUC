@@ -10,6 +10,26 @@ from matplotlib import pyplot as plt
 from IPython import embed as IP
 from unit_commitment import GroupDataFrame, MyDataFrame, NewNetwork, create_model
 
+def return_unitont0state(instance, t=None):
+    # Find number of online/offline time intervals of thermal gens at the end of period t
+    if not t:
+        t = instance.TimePeriods.last()
+    elif t not in instance.TimePeriods:
+        print "WARNING: NO UNIT_ON CREATED."
+        return None
+    dict_results = dict()
+    for g in instance.ThermalGenerators.iterkeys():
+        t_on  = max(0, value(instance.UnitOnT0State[g]))
+        t_off = max(0, -value(instance.UnitOnT0State[g]))
+        for tau in instance.TimePeriods.iterkeys():
+            if instance.TimePeriods.value.index(tau) <= instance.TimePeriods.value.index(t):
+                b = value(instance.UnitOn[g, tau])
+                b = int(round(b))
+                t_on  = b*(t_on + b) # Number of the last consecutive online intervals
+                t_off = (1-b)*(t_off + 1 - b) # Number of the last consecutive offline intervals
+        dict_results[g] = int(round(sign(t_on)*t_on - sign(t_off)*t_off)) # This is an integer?
+    return dict_results
+
 def return_downscaled_initial_condition(instance, nI_L, nI_S):
     '''
     Calculate upper and lower dispatch limits based on the given solved Pyomo instance.
@@ -481,6 +501,9 @@ def test_dauc(casename, showing_gens='problematic'):
     nI_RTC = 4  # Number of RTUC intervals in an hour
     nI_RTD = 12 # Number of RTED intervals in an hour
     nI_AGC = 3600/6 # Number of AGC intervals in an hour
+    nI_RTCperDAC = nI_RTC/nI_DAC
+    nI_RTDperRTC = nI_RTD/nI_RTC
+    nI_AGCperRTD = nI_AGC/nI_RTD
 
     # Time table, should we add AGC time as well?
     df_timesequence = pd.DataFrame(columns=['DAC', 'RTC', 'RTD'], dtype='int')
@@ -536,16 +559,20 @@ def test_dauc(casename, showing_gens='problematic'):
         df_genfor_RTD.fillna(0, inplace=True)
 
         # Prepare AGC data
-        # df_busload_AGC = pd.read_csv(csv_busload_AGC, index_col='Slot')
-        # df_genfor_AGC  = pd.read_csv(csv_genfor_AGC, index_col='Slot')
-        # if 'LOAD' in df_busload_AGC.columns.difference(['LOAD']):
-        #     df_busload_AGC = df_busload_AGC.loc[:, df_busload_AGC.columns.difference(['LOAD'])]
-        # df_busload_AGC = MyDataFrame(df_busload_AGC.loc[:, df_busload_AGC.columns.difference(['LOAD'])])
-        # df_busload_AGC.fillna(0, inplace=True)
-        # df_busload_full_AGC = pd.DataFrame(0, index=df_busload_AGC.index, columns=network.ls_bus) # For ACE calculation, include all buses
-        # df_busload_full_AGC.loc[:, df_busload_AGC.columns] = df_busload_AGC
-        # df_genfor_AGC  = MyDataFrame(df_genfor_AGC)
-        # df_genfor_AGC.fillna(0, inplace=True)
+        df_busload_AGC = pd.read_csv(csv_busload_AGC, index_col='Slot')
+        df_genfor_AGC  = pd.read_csv(csv_genfor_AGC, index_col='Slot')
+        if 'LOAD' in df_busload_AGC.columns.difference(['LOAD']):
+            df_busload_AGC = df_busload_AGC.loc[:, df_busload_AGC.columns.difference(['LOAD'])]
+        df_busload_AGC = MyDataFrame(df_busload_AGC.loc[:, df_busload_AGC.columns.difference(['LOAD'])])
+        df_busload_AGC.fillna(0, inplace=True)
+        df_busload_full_AGC = pd.DataFrame(0, index=df_busload_AGC.index, columns=network.set_bus) # For ACE calculation, include all buses
+        df_busload_full_AGC.loc[:, df_busload_AGC.columns] = df_busload_AGC
+        df_genfor_AGC  = MyDataFrame(df_genfor_AGC)
+        df_genfor_AGC.fillna(0, inplace=True)
+
+        df_agc_param = pd.DataFrame(0, index=network.dict_set_gens['ALL'], columns=['ACE_TARGET'])
+        df_agc_param.loc[:, 'DEAD_BAND'] = dfs.df_gen.loc[:, 'DEAD_BAND']
+        df_agc_param.loc[:, 'AGC_MODE']  = dfs.df_gen.loc[:, 'AGC_MODE']
 
 
         # For debugging
@@ -639,6 +666,20 @@ def test_dauc(casename, showing_gens='problematic'):
             if g in network.dict_set_gens['THERMAL']:
                 dict_UnitOnT0State[g]    = 12
     ############################################################################
+
+    # RTED results
+    df_POWER_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_POWER_RTD_ADVISRY = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_REGUP_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_REGDN_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_SPNUP_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+
+    # AGC results
+    df_ACTUAL_GENERATION = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    df_AGC_SCHEDULE      = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    df_ACE_TARGET        = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    df_AGC_MOVE          = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    df_ACE               = MyDataFrame(index=df_genfor_AGC.index, columns=['RAW', 'CPS2', 'SACE', 'ABS', 'INT'])
 
     # Start DAUC
     ############################################################################
@@ -749,6 +790,10 @@ def test_dauc(casename, showing_gens='problematic'):
     df_dispatch_min_DAC2RTC = dfs_DAC2RTC.df_dispatch_min
     df_dispatch_max_DAC2RTC = dfs_DAC2RTC.df_dispatch_max
 
+    # Convert DAC initial conditions into RTC initial conditions
+    dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State)*nI_RTCperDAC).to_dict()
+    dict_PowerGeneratedT0_RTC = dict_PowerGeneratedT0
+
     for i_rtuc in np.arange(1, 2):
         t_s_RTC = i_rtuc # 4*(i_rtuc-1) + 1
         t_e_RTC   = i_rtuc + 3 # 4*i_rtuc
@@ -770,13 +815,14 @@ def test_dauc(casename, showing_gens='problematic'):
         ).to_dict_2d()
 
         # Create RTUC model
+        IP()
         ins_RTC = create_model(
             network,
             df_busload_RTC.loc[t_s_RTC: t_e_RTC, :], # Only bus load, first dimension time starts from 1, no total load
             df_genfor_RTC.loc[t_s_RTC: t_e_RTC, :], # Only generation from nonthermal gens, first dim time starts from 1
             nI_RTC, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
-            dict_UnitOnT0State=dict_UnitOnT0State, # How many time periods the units have been on at T0 from last RTUC model
-            dict_PowerGeneratedT0=dict_PowerGeneratedT0, # Initial power generation level at T0 from last RTUC model
+            dict_UnitOnT0State=dict_UnitOnT0State_RTC, # How many time periods the units have been on at T0 from last RTUC model
+            dict_PowerGeneratedT0=dict_PowerGeneratedT0_RTC, # Initial power generation level at T0 from last RTUC model
             ##############################
             dict_UnitOn=dict_uniton_slow, # Committment statuses of committed units
             dict_UnitStartUp=dict_UnitStartUp_slow, # Startup indicator, keys should be the same as dict_UnitOn
@@ -798,6 +844,20 @@ def test_dauc(casename, showing_gens='problematic'):
 
         if results_RTC.solver.termination_condition == TerminationCondition.infeasible:
             print 'Infeasibility detected in the RTUC model!'
+        msg = (
+            'RTUC Model {} '
+            'solved at: {:>.2f} s, '
+            'objective: {:>.2f}, '
+            'penalty: {:s}'.format(
+            # 'penalty: {:>.2f}'.format(
+                i_rtuc, 
+                time() - t0,
+                value(ins_RTC.TotalCostObjective),
+                'N/A',
+                # value(ins_RTC.SlackPenalty),
+            )
+        )
+        print(msg)
 
         dfs_RTC2RTD = return_downscaled_initial_condition(ins_RTC, nI_RTC, nI_RTD)
         df_UNITON_RTC2RTD       = dfs_RTC2RTD.df_uniton
@@ -807,6 +867,10 @@ def test_dauc(casename, showing_gens='problematic'):
         df_dispatch_max_RTC2RTD = dfs_RTC2RTD.df_dispatch_max
 
         ls_t_ed = df_timesequence.loc[df_timesequence['RTC']==t_s_RTC, 'RTD'].values
+
+        # Convert RTC initial conditions into RTD initial conditions
+        dict_UnitOnT0State_RTD = (pd.Series(dict_UnitOnT0State_RTC)*nI_RTDperRTC).to_dict()
+        dict_PowerGeneratedT0_RTD = dict_PowerGeneratedT0_RTC
 
         for t_s_RTD in ls_t_ed:
             t_e_RTD = t_s_RTD + 5 # Total 6 ED intervals, 1 binding interval, 5 look-ahead interval, 30 min in total
@@ -833,8 +897,8 @@ def test_dauc(casename, showing_gens='problematic'):
                 df_busload_RTD.loc[t_s_RTD: t_e_RTD, :], # Only bus load, first dimension time starts from 1, no total load
                 df_genfor_RTD.loc[t_s_RTD: t_e_RTD, :], # Only generation from nonthermal gens, first dim time starts from 1
                 nI_RTD, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
-                dict_UnitOnT0State=dict_UnitOnT0State, # How many time periods the units have been on at T0 from last RTUC model
-                dict_PowerGeneratedT0=dict_PowerGeneratedT0, # Initial power generation level at T0 from last RTUC model
+                dict_UnitOnT0State=dict_UnitOnT0State_RTD, # How many time periods the units have been on at T0 from last RTUC model
+                dict_PowerGeneratedT0=dict_PowerGeneratedT0_RTD, # Initial power generation level at T0 from last RTUC model
                 ##############################
                 dict_UnitOn=dict_uniton_all, # Committment statuses of committed units
                 dict_UnitStartUp=dict_UnitStartUp_all, # Startup indicator, keys should be the same as dict_UnitOn
@@ -842,10 +906,10 @@ def test_dauc(casename, showing_gens='problematic'):
                 dict_DispatchLimitsLower=dict_DispacthLimitsLower_all, # Only apply for committed units, keys should be the same as dict_UnitOn
                 dict_DispatchLimitsUpper=dict_DispacthLimitsUpper_all, # Only apply for committed units, keys should be the same as dict_UnitOn
             )
-            msg = "RTED Model {} created!".format(t_s_RTD)
-            print msg
-            content += msg
-            content += '\n'
+            # msg = "RTED Model {} created!".format(t_s_RTD)
+            # print msg
+            # content += msg
+            # content += '\n'
 
             # Solve RTUC model
             try:
@@ -855,9 +919,310 @@ def test_dauc(casename, showing_gens='problematic'):
                 IP()
 
             if results_RTD.solver.termination_condition == TerminationCondition.infeasible:
-                print 'Infeasibility detected in the RTUC model!'
+                print 'Infeasibility detected in the RTED model!'
+            msg = (
+                '    '
+                'RTED Model {} '
+                'solved at: {:>.2f} s, '
+                'objective: {:>.2f}, '
+                'penalty: {:>.2f}'.format(
+                    t_s_RTD, 
+                    time() - t0,
+                    value(ins_RTD.TotalCostObjective),
+                    value(ins_RTD.SlackPenalty),
+                )
+            )
+            print msg
 
-    IP()
+            # IP()
+            ####################################################################
+            # End of RTED
+
+            # Start of AGC, can we write a separate function for it?
+            ####################################################################
+            t_start_AGC = int( (t_s_RTD-1)*nI_AGC/nI_RTD+1 )
+            t_end_AGC   = int( nI_AGC/nI_RTD*t_s_RTD )
+            tindex_RTD = np.array(ins_RTD.TimePeriods.value)
+            tindex_AGC = np.arange(
+                (tindex_RTD[0]-1)*nI_AGCperRTD+1, # Index of the starting interval of shorter time scale
+                tindex_RTD[0]*nI_AGCperRTD+1,
+                1
+            )
+
+            # Gather information for the AGC run
+            ls_curtail_binding   = list()
+            ls_nocurtail_binding = list()
+            # for g in network.dict_gens['Non thermal']:
+            #     if value(ins_ed.PowerGenerated[g, t_start_ed]) < value(ins_ed.PowerForecast[g, t_start_ed]):
+            #         ls_curtail_binding.append(g)
+            #     else:
+            #         ls_nocurtail_binding.append(g)
+
+            # Gather dispatch setting point, reserve and ramp available for AGC
+            ls_gen_all = list(ins_RTD.AllGenerators)
+            df_power_RTD_initial = pd.DataFrame(0.0, index=[t_s_RTD], columns=ls_gen_all)
+            df_ramp_up_AGC = pd.DataFrame(0.0, index=[t_s_RTD], columns=ls_gen_all)
+            df_ramp_dn_AGC = pd.DataFrame(0.0, index=[t_s_RTD], columns=ls_gen_all)
+
+            for g in ls_gen_all:
+                df_POWER_RTD_BINDING.at[t_s_RTD, g] = value(ins_RTD.PowerGenerated[g, t_s_RTD])
+                df_power_RTD_initial.at[t_s_RTD, g] = value(ins_RTD.PowerGeneratedT0[g])
+                if g in ins_RTD.ThermalGenerators: # In our case, only thermal gens provide regulation
+                    df_REGUP_RTD_BINDING.at[t_s_RTD, g] = value(ins_RTD.RegulatingReserveUpAvailable[g, t_s_RTD])
+                    df_REGDN_RTD_BINDING.at[t_s_RTD, g] = value(ins_RTD.RegulatingReserveDnAvailable[g, t_s_RTD])
+                    df_SPNUP_RTD_BINDING.at[t_s_RTD, g] = value(ins_RTD.SpinningReserveUpAvailable[g, t_s_RTD])
+                    df_ramp_up_AGC.at[t_s_RTD, g] = value(ins_RTD.RampUpLimitPerHour[g])/nI_AGCperRTD
+                    df_ramp_dn_AGC.at[t_s_RTD, g] = value(ins_RTD.RampDownLimitPerHour[g])/nI_AGCperRTD
+                else: # Non-thermal genes, gather curtailment status
+                    if value(ins_RTD.PowerGenerated[g, t_s_RTD]) < value(ins_RTD.PowerForecast[g, t_s_RTD]):
+                        ls_curtail_binding.append(g)
+                    else:
+                        ls_nocurtail_binding.append(g)
+            
+            # Identify units that are providing both reg reserves.
+            ls_gen_regon  = df_REGUP_RTD_BINDING.loc[t_s_RTD, (df_REGUP_RTD_BINDING.loc[t_s_RTD, :]>=1E-3) | (df_REGDN_RTD_BINDING.loc[t_s_RTD, :]>=1E-3)].index
+            ls_gen_regoff = df_REGUP_RTD_BINDING.columns.difference(ls_gen_regon)
+            ls_gen_renew  = ins_RTD.NonThermalGenerators.value
+
+            # For the units that are not providing reg-up/down reserves, they will
+            # just follow the downscaled RTD schedule.
+            ar_step_RTD2AGC = (df_POWER_RTD_BINDING.loc[t_s_RTD, :].values - df_power_RTD_initial.loc[t_s_RTD, :].values)/nI_AGCperRTD
+            df_power_end_RTD2AGC = pd.DataFrame(
+                np.repeat(np.arange(1, nI_AGCperRTD+1)[:, np.newaxis], len(ls_gen_all), axis=1)*ar_step_RTD2AGC 
+                + df_power_RTD_initial.loc[t_s_RTD, :].values,
+                index=tindex_AGC,
+                columns=ls_gen_all,
+            )
+
+            # For the units that do provide reg reserves, prepare the AGC data.
+            ar_power0_regon   = df_power_RTD_initial.loc[t_s_RTD, ls_gen_regon].values
+            ar_power_regon    = df_POWER_RTD_BINDING.loc[t_s_RTD, ls_gen_regon].values
+            ar_regup_regon    = df_REGUP_RTD_BINDING.loc[t_s_RTD, ls_gen_regon].values
+            ar_regdn_regon    = df_REGDN_RTD_BINDING.loc[t_s_RTD, ls_gen_regon].values
+            ar_rampup_regon   = df_ramp_up_AGC.loc[t_s_RTD, ls_gen_regon].values
+            ar_rampdn_regon   = df_ramp_dn_AGC.loc[t_s_RTD, ls_gen_regon].values
+            ar_deadband_regon = df_agc_param.loc[ls_gen_regon, 'DEAD_BAND'].values
+            ar_pmax_regon     = dfs.df_gen.loc[ls_gen_regon, 'PMAX'].values # avoid using dfs
+            ar_pmin_regon     = dfs.df_gen.loc[ls_gen_regon, 'PMIN'].values # avoid using dfs
+
+            ar_regup_share_regon = ar_regup_regon if sum(ar_regup_regon)==0 else ar_regup_regon/sum(ar_regup_regon)
+            ar_regdn_share_regon = ar_regdn_regon/sum(ar_regdn_regon)
+
+            ar_mode_raw_regon  = (df_agc_param.loc[ls_gen_regon, 'AGC_MODE'] == 'RAW').values
+            ar_mode_sace_regon = (df_agc_param.loc[ls_gen_regon, 'AGC_MODE'] == 'SACE').values
+
+            # Calculate upper/lower power limit including regulation
+            # Because in my RTED formulation, the max available power only 
+            # considers a fixed dispatch setting point + reg-up + spin-up, 
+            # while in AGC the dispatch setting point changes from this 
+            # interval continuously into the next interval, and the sum may
+            # exceed the Pmax or lower than Pmin, thus the sums must be 
+            # capped by Pmax, or floored by Pmin.
+            ar_up_limit_regon = np.minimum(ar_pmax_regon, ar_power_regon + ar_regup_regon)
+            ar_dn_limit_regon = np.maximum(ar_pmin_regon, ar_power_regon - ar_regdn_regon)
+
+            # Start the AGC looooooooop
+            ####################################################################
+            for t_AGC in tindex_AGC:
+                # First, determine the actual generation
+                if t_AGC == 1:
+                    ar_actual_regon  = df_power_RTD_initial.loc[t_s_RTD, ls_gen_regon].values
+                    ar_actual_regoff = df_power_RTD_initial.loc[t_s_RTD, ls_gen_regoff].values
+                else:
+                    ar_actual_regon  = df_AGC_SCHEDULE.loc[t_AGC-1, ls_gen_regon].values
+                    ar_actual_regoff = df_AGC_SCHEDULE.loc[t_AGC-1, ls_gen_regoff].values
+
+                # Then, calculate ACE and determine AGC target, note that we 
+                # don't have line loss accounted for.
+                total_gen  = ar_actual_regon.sum() + ar_actual_regoff.sum()
+                total_load = df_busload_AGC.loc[t_AGC, :].sum()
+                ace_raw = total_gen - total_load # - total_loss
+
+                if t_AGC == 1:
+                    previous_ACE_int  = 0
+                    previous_CPS2_ACE = 0
+                    previous_SACE     = 0
+                    previous_ACE_ABS  = 0
+                else:
+                    previous_ACE_int  = df_ACE.at[t_AGC-1, 'INT']
+                    previous_ACE_ABS  = df_ACE.at[t_AGC-1, 'ABS']
+
+                    # if t_AGC%(CPS2_interval_minute*60/(3600/nI_AGC))==1: # This indicates the start of a new CPS2 interval
+                    #     previous_CPS2_ACE = 0
+                    # else:
+                    #     previous_CPS2_ACE = df_ACE.at[t_AGC-1, 'CPS2']
+
+                    # i_s = max( 1, round(t_AGC - Type3_integral/(3600/nI_AGC)) )
+                    # i_e = t_AGC-1
+                    # previous_SACE = df_ACE.loc[i_s: i_e+1, 'SACE']
+
+                df_ACE.at[t_AGC, 'RAW' ] = ace_raw
+                df_ACE.at[t_AGC, 'INT' ] = ace_raw*float(t_AGC)/nI_AGC + previous_ACE_int
+                df_ACE.at[t_AGC, 'ABS' ] = abs(ace_raw*float(t_AGC)/nI_AGC) + previous_ACE_ABS
+                # df_ACE.at[t_AGC, 'CPS2'] = ace_raw*(t_AGC*3600/nI_agc/(CPS2_interval_minute*60.0)) + previous_CPS2_ACE
+                # df_ACE.at[t_AGC, 'SACE'] = K1*ace_raw + K2*np.mean(previous_SACE)
+
+                # Set ACE target for AGC
+                ar_acetarget_regon = np.zeros(len(ls_gen_regon))
+                # seconds_Left_in_CPS2_interval = (
+                #     CPS2_interval_minute*60.0 
+                #     - 
+                #     (t_AGC*3600/nI_AGC) % (CPS2_interval_minute*60)
+                # ) # In second
+                ar_acetarget_regon[ar_mode_raw_regon]  = df_ACE.at[t_AGC, 'RAW']
+                ar_acetarget_regon[ar_mode_sace_regon] = df_ACE.at[t_AGC, 'SACE']
+                # df_agc_tmp.loc[df_agc_tmp['AGC_MODE']=='CPS2', 'ACE_TARGET']   = (
+                #     dict_ACE['CPS2'][-1] 
+                #     + 
+                #     dict_ACE['RAW'][-1]*(
+                #         seconds_Left_in_CPS2_interval/(CPS2_interval_minute*60.0)
+                #     )
+                # )
+                # df_agc_tmp.loc[
+                #     (df_agc_tmp['AGC_MODE'] == 'CPS2')
+                #     & (df_agc_tmp['DEAD_BAND'] <= L10),
+                #     'DEAD_BAND'
+                # ] = L10
+
+                # Last, determine the AGC movement and schedule
+                # Determine responding and non-responding units to ACE signals
+                i_regup_on = (ar_regup_regon >= 1E-3)&(ar_acetarget_regon <= -ar_deadband_regon)
+                i_regdn_on = (ar_regdn_regon >= 1E-3)&(ar_acetarget_regon >= ar_deadband_regon)
+
+                # First, determine RTED scheduled movement during one AGC 
+                # interval for reg non-responding units, note AGC_MOVE can be 
+                # either positive or negative 
+
+                # Use the initial actual generation and next adivsory dispatch 
+                # level to determine the RTED scheduled movement, to avoid 
+                # generation falling below minimum thermal power level
+                ar_agcmove_regon = np.zeros(ls_gen_regon.size)
+                ar_agcmove_regon[~(i_regup_on | i_regdn_on)] = (
+                    ar_power_regon[~(i_regup_on | i_regdn_on)] 
+                    - ar_power0_regon[~(i_regup_on | i_regdn_on)]
+                )/nI_AGCperRTD # This should get the same results as using df_power_end_RTD2AGC
+
+                # Calculate upper/lower power limit including regulation
+                # Because in my RTED formulation, the max available power only 
+                # considers a fixed dispatch setting point + reg-up + spin-up, 
+                # while in AGC the dispatch setting point changes from this 
+                # interval continuously into the next interval, and the sum may
+                # exceed the Pmax or lower than Pmin, thus the sums must be 
+                # capped by Pmax, or floored by Pmin.
+                # df_agc_tmp.loc[:, 'POWER+REGUP'] = pd.concat(
+                #     [
+                #         df_agc_tmp['PMAX'],
+                #         df_ACTUAL_GENERATION.loc[t_AGC, :] + df_agc_tmp.loc[:, 'REG_UP_AGC']
+                #     ],
+                #     axis=1
+                # ).min(axis=1)
+                # df_agc_tmp.loc[:, 'POWER-REGDN'] = pd.concat(
+                #     [
+                #         df_agc_tmp['PMIN'],
+                #         df_ACTUAL_GENERATION.loc[t_AGC, :] - df_agc_tmp.loc[:, 'REG_DN_AGC']
+                #     ],
+                #     axis=1
+                # ).max(axis=1)
+
+                # Then, determine AGC movement for AGC responding units, we 
+                # follow FESTIV's option 2, where each unit's deployed 
+                # regulation is proportional to its regulation bid into the RTED market
+                ar_agcmove_regon[i_regup_on] = np.minimum(
+                    -ar_acetarget_regon[i_regup_on]*ar_regup_share_regon[i_regup_on],
+                    ar_up_limit_regon[i_regup_on] - ar_actual_regon[i_regup_on],
+                    ar_rampup_regon[i_regup_on],
+                )
+                ar_agcmove_regon[i_regdn_on] = np.maximum(
+                    ar_acetarget_regon[i_regdn_on]*ar_regdn_share_regon[i_regdn_on],
+                    ar_dn_limit_regon[i_regdn_on] - ar_actual_regon[i_regdn_on],
+                    -ar_rampdn_regon[i_regdn_on],
+                )
+                # df_agc_tmp.loc[i_reg_up_units, 'AGC_MOVE'] = pd.concat(
+                #     [
+                #         -df_agc_tmp.loc[:, 'ACE_TARGET']*df_agc_tmp.loc[:, 'REG_UP_AGC']/sum_reg_up_agc,
+                #         df_agc_tmp.loc[:, 'POWER+REGUP'] - df_ACTUAL_GENERATION.loc[t_AGC, :],
+                #     ],
+                #     axis=1,
+                # ).min(axis=1)
+                # df_agc_tmp.loc[i_reg_dn_units, 'AGC_MOVE'] = pd.concat(
+                #     [
+                #         -df_agc_tmp.loc[:, 'ACE_TARGET']*df_agc_tmp.loc[:, 'REG_DN_AGC']/sum_reg_dn_agc,
+                #         df_agc_tmp.loc[:, 'POWER-REGDN'] - df_ACTUAL_GENERATION.loc[t_AGC, :],
+                #     ],
+                #     axis=1,
+                # ).max(axis=1)
+
+                # Now, determine AGC basepoint, based on ramp rate limits, 
+                # RTED movement (reg non-responding units) and AGC movement 
+                # (reg responding units).
+                # Basically, reg responding units are bounded by three terms: 
+                # available regulation, ramp rate limits and its own ACE target, 
+                # while non-responding units are constrained by RTED schedules 
+                # and ramp rate limits.
+                # tmp = pd.concat(
+                #     [
+                #         df_agc_tmp.loc[:, 'AGC_MOVE'],
+                #         -df_agc_tmp.loc[:, 'RAMP_DN_AGC'] # ramp down is positive
+                #     ],
+                #     axis=1
+                # ).max(axis=1)
+                # df_agc_tmp.loc[:, 'AGC_BASEPOINT'] = pd.concat(
+                #     [
+                #         tmp,
+                #         df_agc_tmp.loc[:, 'RAMP_UP_AGC']
+                #     ],
+                #     axis=1
+                # ).min(axis=1) + df_agc_tmp.loc[:, 'ACTUAL_GENERATION']
+
+                # Finally, let's set the actual generation of all down units to zero
+                # df_agc_tmp.loc[
+                #     df_uniton_all_ed.loc[t_start_ed, abs(df_uniton_all_ed.loc[t_start_ed, :])<1E-3].index, 
+                #     'AGC_BASEPOINT'
+                # ] = 0
+                ar_agcbase_regon  = ar_actual_regon + ar_agcmove_regon
+                ar_agcbase_regoff = df_power_end_RTD2AGC.loc[t_AGC, ls_gen_regoff].values
+
+                # Finally, renewable output is subject to resource availability
+                # Maybe we should have one independent array for renewables
+                df_AGC_SCHEDULE.loc[t_AGC, ls_gen_regon]  = ar_agcbase_regon
+                df_AGC_SCHEDULE.loc[t_AGC, ls_gen_regoff] = ar_agcbase_regoff
+
+                # think about the following line
+                ar_poweravail_renew = df_genfor_AGC.loc[t_AGC, ls_gen_renew].values
+                ar_agcbase_renew = df_AGC_SCHEDULE.loc[t_AGC, ls_gen_renew].values
+                ar_agcbase_renew[ar_poweravail_renew<ar_agcbase_renew] = ar_poweravail_renew[ar_poweravail_renew<ar_agcbase_renew]
+                df_AGC_SCHEDULE.loc[t_AGC, ls_gen_renew] = ar_agcbase_renew
+
+            msg = (
+                '    '
+                'AGC {} to {} '
+                'done at: {:>.2f} s, '.format(
+                    tindex_AGC[0],
+                    tindex_AGC[-1],
+                    time() - t0,
+                )
+            )
+            print msg
+
+
+            # End of the AGC loop
+            ####################################################################
+
+            # Extract initial parameters from the binding interval for the next RTED run
+            dict_UnitOnT0State_RTD = return_unitont0state(
+                ins_RTD, ins_RTD.TimePeriods.first()
+            )
+            # dict_PowerGeneratedT0_ed = return_powergenerated_t(
+            #     ins_ed, ins_ed.TimePeriods.first()
+            # )
+            dict_PowerGeneratedT0_RTD = df_AGC_SCHEDULE.loc[t_AGC, network.dict_set_gens['THERMAL']].to_dict()
+
+
+        # Extract initial parameters from the binding interval of the last ED run for the next RTUC run
+        dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State_RTD)/nI_RTDperRTC).to_dict()
+        # dict_UnitOnT0State_RTC = return_unitont0state(ins_RTD, ins_RTD.TimePeriods.first())
+        dict_PowerGeneratedT0_RTC = dict_PowerGeneratedT0_RTD
+
 
 if __name__ == '__main__':
     test_dauc('118')
