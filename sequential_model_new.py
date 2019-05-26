@@ -75,6 +75,20 @@ def return_downscaled_initial_condition(instance, nI_L, nI_S):
         df_UNITONT0_L.at[t0_L, g] = value(instance.UnitOnT0[g])
         if g in instance.SigmaDnT0:
             df_SIGMADNT0_L.at[t0_L, g] = value(instance.SigmaDnT0[g])
+        else:
+            # This is a quick fix, since for committed unit, SigmaDnT0 is not 
+            # included by instance, this is related to my biggest headache, 
+            # i.e., what if a unit is turned off completedly after the model horizon?
+            # Basically, SigmaDnT0 is not included for committed unit because
+            # sigma_power_times_dn_initial_rule is not able to handle the case
+            # when a unit is turned off beyond the end of model horizon.
+            # And it will lead to infeasibility of 
+            # thermal_gen_output_limits_shutdown_lower_initial_rule
+            # and thermal_gen_output_limits_shutdown_upper_initial_rule.
+
+            # This fix may affect time performance, besides, I think maybe we 
+            # should use abs() function to compare float numbers.
+            df_SIGMADNT0_L.at[t0_L, g] = value(instance.SigmaDn[g, tindex_L[0]]) *(value(instance.PowerGeneratedT0[g])<=value(instance.MinimumPowerOutput[g]))
         for t in tindex_L:
             df_UNITON_L.at[t, g]       = value(instance.UnitOn[g, t])
             df_UNITSTUP_L.at[t, g]     = value(instance.UnitStartUp[g, t])
@@ -505,6 +519,490 @@ def build_texas_network():
 
     return dfs, network_texas
 
+def debug_UC(casename):
+    t0 = time()
+    content = ''
+
+    nI_DAC = 1  # Number of DAUC intervals in an hour
+    nI_RTC = 4  # Number of RTUC intervals in an hour
+    nI_RTD = 12 # Number of RTED intervals in an hour
+    nI_AGC = 3600/6 # Number of AGC intervals in an hour
+    nI_RTCperDAC = nI_RTC/nI_DAC
+    nI_RTDperRTC = nI_RTD/nI_RTC
+    nI_AGCperRTD = nI_AGC/nI_RTD
+
+    # Time table, should we add AGC time as well?
+    df_timesequence = pd.DataFrame(columns=['DAC', 'RTC', 'RTD'], dtype='int')
+    for i in range(1, 25):
+        for j in range(1, 5):
+            for k in range(1,4):
+                index = (i-1)*12+(j-1)*3 + k
+                df_timesequence.loc[index, 'DAC'] = i
+                df_timesequence.loc[index, 'RTC'] = (i-1)*4 + j
+                df_timesequence.loc[index, 'RTD'] = index
+    df_timesequence = df_timesequence.astype('int')
+
+    # Initial conditions
+    dict_UnitOnT0State = dict()
+    dict_PowerGeneratedT0 = dict()
+
+    if casename == '118':
+        dfs, network = build_118_network()
+
+        # Data files
+        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/118bus/loads.csv'
+        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/118bus/generator.csv'
+        csv_busload_RTC       = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_loads.csv'
+        csv_genfor_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ha_generator.csv'
+        csv_busload_RTD       = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ed_loads.csv'
+        csv_genfor_RTD        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/ed_generator.csv'
+        csv_busload_AGC       = '/home/bxl180002/git/FlexibleRampSCUC/118bus/agc_loads.csv'
+        csv_genfor_AGC        = '/home/bxl180002/git/FlexibleRampSCUC/118bus/agc_generator.csv'
+
+        # Prepare day-ahead UC data
+        df_busload = pd.read_csv(csv_busload, index_col=0)
+        df_genfor  = pd.read_csv(csv_genfor, index_col=0)
+        df_busload = MyDataFrame(df_busload.loc[:, df_busload.columns.difference(['LOAD'])])
+        df_genfor  = MyDataFrame(df_genfor)
+        df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
+        df_genfor_nonthermal = df_genfor.loc[:, network.dict_set_gens['NONTHERMAL']]
+        df_genfor_nonthermal.fillna(0, inplace=True)
+
+        # Prepare real-time UC (hourly ahead) data
+        df_busload_RTC = pd.read_csv(csv_busload_RTC, index_col=['Slot'])
+        df_genfor_RTC  = pd.read_csv(csv_genfor_RTC, index_col=['Slot'])
+        df_busload_RTC = MyDataFrame(df_busload_RTC.loc[:, df_busload_RTC.columns.difference(['LOAD'])])
+        df_genfor_RTC  = MyDataFrame(df_genfor_RTC)
+        df_genfor_RTC  = df_genfor_RTC.loc[:, network.dict_set_gens['NONTHERMAL']]
+        df_genfor_RTC.fillna(0, inplace=True)
+
+        # Prepare economic dispatch data
+        df_busload_RTD = pd.read_csv(csv_busload_RTD, index_col=['Slot'])
+        df_genfor_RTD  = pd.read_csv(csv_genfor_RTD, index_col=['Slot'])
+        df_busload_RTD = MyDataFrame(df_busload_RTD.loc[:, df_busload_RTD.columns.difference(['LOAD'])])
+        df_genfor_RTD  = MyDataFrame(df_genfor_RTD)
+        df_genfor_RTD  = df_genfor_RTD.loc[:, network.dict_set_gens['NONTHERMAL']]
+        df_genfor_RTD.fillna(0, inplace=True)
+
+        # Prepare AGC data
+        df_busload_AGC = pd.read_csv(csv_busload_AGC, index_col='Slot')
+        df_genfor_AGC  = pd.read_csv(csv_genfor_AGC, index_col='Slot')
+        if 'LOAD' in df_busload_AGC.columns.difference(['LOAD']):
+            df_busload_AGC = df_busload_AGC.loc[:, df_busload_AGC.columns.difference(['LOAD'])]
+        df_busload_AGC = MyDataFrame(df_busload_AGC.loc[:, df_busload_AGC.columns.difference(['LOAD'])])
+        df_busload_AGC.fillna(0, inplace=True)
+        df_busload_full_AGC = pd.DataFrame(0, index=df_busload_AGC.index, columns=network.set_bus) # For ACE calculation, include all buses
+        df_busload_full_AGC.loc[:, df_busload_AGC.columns] = df_busload_AGC
+        df_genfor_AGC  = MyDataFrame(df_genfor_AGC)
+        df_genfor_AGC.fillna(0, inplace=True)
+
+        df_agc_param = pd.DataFrame(0, index=network.dict_set_gens['ALL'], columns=['ACE_TARGET'])
+        df_agc_param.loc[:, 'DEAD_BAND'] = dfs.df_gen.loc[:, 'DEAD_BAND']
+        df_agc_param.loc[:, 'AGC_MODE']  = dfs.df_gen.loc[:, 'AGC_MODE']
+
+
+        # For debugging
+
+        # Control initial conditions
+        ########################################################################
+        # All units are off
+        # for g in network.dict_set_gens['ALL']:
+        #     dict_PowerGeneratedT0[g] = 0
+        #     if g in network.dict_set_gens['THERMAL']:
+        #         dict_UnitOnT0State[g]    = -12
+
+        # All units are on and at minimum generation levels
+        for g in network.dict_set_gens['ALL']:
+            dict_PowerGeneratedT0[g] = dfs.df_gen.at[g, 'PMIN']
+            if g in network.dict_set_gens['THERMAL']:
+                dict_UnitOnT0State[g]    = 12
+
+        # All units are on and at maximum generation levels
+        # for g in network.dict_set_gens['ALL']:
+        #     dict_PowerGeneratedT0[g] = dfs.df_gen.at[g, 'PMAX']
+        #     if g in network.dict_set_gens['THERMAL']:
+        #         dict_UnitOnT0State[g]    = 12
+        ########################################################################
+
+        # Start-up/shut-down tests
+        ########################################################################
+        # Start-up test
+        # Pmax: 595 MW, Pmin: 298.29 MW, Tsu = Tsd = 8 hrs
+        dict_PowerGeneratedT0['CC NG 35'] = 298.29/8*4
+        dict_UnitOnT0State['CC NG 35'] = 4
+
+        # Shut-down test
+        # Pmax: 943.5 MW, Pmin: 503.86 MW, Tsu = Tsd = 12 hrs
+        dict_PowerGeneratedT0['CC NG 16'] = 503.86/8*3
+        dict_UnitOnT0State['CC NG 16'] = 12
+
+        # Start-up/shut-down test for super slow units, of which the start-up 
+        # time is over the length of the model horizon.
+        # Pmax: 20 MW, Pmin: 6 MW, Tsu = Tsd = 48 hrs
+
+        # Start-up test # 1: Beginning of start-up period
+        dict_PowerGeneratedT0['ST Coal 01'] = 6.0/48*3
+        dict_UnitOnT0State['ST Coal 01'] = 3
+
+        # Start-up test # 2: End of start-up period 
+        # dict_PowerGeneratedT0['ST Coal 01'] = 6.0/48*40
+        # dict_UnitOnT0State['ST Coal 01'] = 40
+
+        # Shut-down test # 1: End of shut-down period
+        # Sadly, we still don't know how to model the case where z_{g, t} = 1 
+        # when t > te, in another word, when the ending interval of the 
+        # shut-down process is beyond the end of model horizon. However, such 
+        # scenario won't be the output of the UC model, since the UC model has 
+        # to know then the generator shuts down (i.e., z_{g, t} = 1) first hand.
+        # In another word, in the UC model results, when z_{g, t} = 1, t is 
+        # always less than te.
+        # dict_PowerGeneratedT0['ST Coal 01'] = 6.0/48*3
+        # dict_UnitOnT0State['ST Coal 01'] = 90
+        ########################################################################
+
+    elif casename == 'TX':
+        # Texas 2000 system
+
+        dfs, network = build_texas_network()
+
+        csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
+        csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
+        csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
+        csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
+        csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
+        csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
+        csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
+        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
+        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
+        csv_busload_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_load.csv'
+        csv_genfor_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_generator.csv'
+        csv_busload_RTD       = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_load.csv'
+        csv_genfor_RTD        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_generator.csv'
+
+        df_busload = pd.read_csv(csv_busload, index_col=0)
+        df_genfor  = pd.read_csv(csv_genfor, index_col=0)
+        df_busload = MyDataFrame(df_busload.loc[:, df_busload.columns.difference(['LOAD'])])
+        df_genfor  = MyDataFrame(df_genfor)
+        df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
+        df_genfor_nonthermal = df_genfor.loc[:, network.dict_set_gens['NONTHERMAL']]
+        df_genfor_nonthermal.fillna(0, inplace=True)
+
+        for g in network.dict_set_gens['ALL']:
+            dict_PowerGeneratedT0[g] = dfs.df_gen.at[g, 'PMIN']
+            if g in network.dict_set_gens['THERMAL']:
+                dict_UnitOnT0State[g]    = 12
+    ############################################################################
+
+    # RTED results
+    df_POWER_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_POWER_RTD_ADVISRY = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_REGUP_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_REGDN_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_SPNUP_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+
+    # AGC results
+    df_ACTUAL_GENERATION = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    df_AGC_SCHEDULE      = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    df_ACE_TARGET        = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    df_AGC_MOVE          = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    df_ACE               = MyDataFrame(index=df_genfor_AGC.index, columns=['RAW', 'CPS2', 'SACE', 'ABS', 'INT'])
+
+    # Start DAUC
+    ############################################################################
+    model = create_model(
+        network,
+        df_busload,
+        df_genfor_nonthermal,
+        nI=nI_DAC,
+        dict_UnitOnT0State=dict_UnitOnT0State,
+        dict_PowerGeneratedT0=dict_PowerGeneratedT0,
+    )
+    msg = 'Model created at: {:>.2f} s'.format(time() - t0)
+    print(msg)
+    content += msg
+    content += '\n'
+
+    instance = model
+    optimizer = SolverFactory('cplex')
+    results = optimizer.solve(instance, options={"mipgap":0.001})
+    instance.solutions.load_from(results)
+    msg = 'Model solved at: {:>.2f} s, objective: {:>.2f}'.format(
+            time() - t0,
+            value(instance.TotalCostObjective)
+        )
+    print(msg)
+    content += msg
+    content += '\n'
+    # IP()
+
+    # For debugging purpose only, normally, all slack variables should be 0
+    print 'Non-zero slack variables:'
+    items = [
+        'Slack_startup_lower',  'Slack_startup_upper',   'Slack_shutdown_lower', 
+        'Slack_shutdown_upper', 'Slack_overlap_startup', 'Slack_overlap_shutdown', 
+        'Slack_rampup',         'Slack_rampdn', 
+    ]
+    for i in items:
+        attr = getattr(instance, i)
+        for k in attr.iterkeys():
+            if abs(value(attr[k])) > 1e-10: # Slack variable tolerance
+                print i, k, value(attr[k])
+    ############################################################################
+    # End of DAUC
+
+    # Processing some DAUC results
+    ############################################################################
+    # For those gens showing weird results, where y or z are fractions, while 
+    # supposedly they can only be 0 or 1.
+    set_gens = set()
+    for k in instance.UnitStartUp:
+        y, z = value(instance.UnitStartUp[k]), value(instance.UnitShutDn[k])
+        if ((abs(y) > 1e-3) and (abs(y-1)>1e-3)) or ((abs(z) > 1e-3) and (abs(z-1) > 1e-3)):
+            print k, value(instance.UnitStartUp[k]), value(instance.UnitShutDn[k])
+            set_gens.add(k[0])
+
+    # # Plot the upper and lower dispatch limits
+    # ls_gens = df_UNITON_DAC.columns.tolist()
+    # for i in range(0, len(ls_gens)):
+    #     g = ls_gens[i]
+    #     if i%9 == 0:
+    #         plt.figure()
+    #     ax = plt.subplot(3, 3, i%9+1)
+    #     p0 = value(instance.PowerGeneratedT0[g])
+    #     p = np.concatenate([[p0], df_POWER_END_DAC[g].values])
+    #     ar_upper = np.concatenate([[p0], df_dispatch_max_RTC[g].values])
+    #     ar_lower = np.concatenate([[p0], df_dispatch_min_RTC[g].values])
+    #     ax.plot(
+    #         np.concatenate(
+    #             [
+    #                 [0],
+    #                 df_POWER_START_DAC.index.values
+    #             ]
+    #         ).astype(float)/df_POWER_START_DAC.index.max(),
+    #         p,
+    #         'k',
+    #     )
+    #     ax.fill_between(
+    #         np.concatenate(
+    #             [
+    #                 [0],
+    #                 df_dispatch_max_RTC.index.values
+    #             ]
+    #         ).astype(float)/df_dispatch_max_RTC.index.max(), 
+    #         ar_lower, 
+    #         ar_upper, 
+    #         color='b', 
+    #         alpha=0.2,
+    #     )
+    #     ax.plot(
+    #         np.concatenate(
+    #             [
+    #                 [0],
+    #                 df_POWER_START_DAC.index.values
+    #             ]
+    #         ).astype(float)/df_POWER_START_DAC.index.max(),
+    #         [value(instance.MinimumPowerOutput[g])]*25,
+    #         'r',
+    #     )
+    #     ax.set_title( g + ', Tsd = {:>g}'.format(value(instance.ShutdownHour[g])))
+    #     if i%9 == 8:
+    #         plt.show()
+    #     elif i == len(ls_gens) - 1:
+    #         plt.show()
+
+    dfs_DAC2RTC = return_downscaled_initial_condition(instance, nI_DAC, nI_RTC)
+    df_UNITON_DAC2RTC       = dfs_DAC2RTC.df_uniton
+    df_UNITSTUP_DAC2RTC     = dfs_DAC2RTC.df_unitstup
+    df_UNITSTDN_DAC2RTC     = dfs_DAC2RTC.df_unitstdn
+    df_dispatch_min_DAC2RTC = dfs_DAC2RTC.df_dispatch_min
+    df_dispatch_max_DAC2RTC = dfs_DAC2RTC.df_dispatch_max
+    df_SIGMAUP_DAC2RTC      = dfs_DAC2RTC.df_sigmaup
+    df_SIGMADN_DAC2RTC      = dfs_DAC2RTC.df_sigmadn
+
+    # Convert DAC initial conditions into RTC initial conditions
+    dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State)*nI_RTCperDAC).to_dict()
+    dict_PowerGeneratedT0_RTC = dict_PowerGeneratedT0
+
+    for i_rtuc in np.arange(1, 2):
+        t_s_RTC = i_rtuc # 4*(i_rtuc-1) + 1
+        t_e_RTC   = i_rtuc + 3 # 4*i_rtuc
+
+        dict_uniton_slow = MyDataFrame(
+            df_UNITON_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_UnitStartUp_slow = MyDataFrame(
+            df_UNITSTUP_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_UnitShutDn_slow = MyDataFrame(
+            df_UNITSTDN_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_DispacthLimitsUpper_slow = MyDataFrame(
+            df_dispatch_max_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_DispacthLimitsLower_slow = MyDataFrame(
+            df_dispatch_min_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_SigmaUp_slow = MyDataFrame(
+            df_SIGMAUP_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_SigmaDn_slow = MyDataFrame(
+            df_SIGMADN_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+
+        # Create RTUC model
+        # IP()
+        ins_RTC = create_model(
+            network,
+            df_busload_RTC.loc[t_s_RTC: t_e_RTC, :], # Only bus load, first dimension time starts from 1, no total load
+            df_genfor_RTC.loc[t_s_RTC: t_e_RTC, :], # Only generation from nonthermal gens, first dim time starts from 1
+            nI_RTC, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
+            dict_UnitOnT0State=dict_UnitOnT0State_RTC, # How many time periods the units have been on at T0 from last RTUC model
+            dict_PowerGeneratedT0=dict_PowerGeneratedT0_RTC, # Initial power generation level at T0 from last RTUC model
+            ##############################
+            dict_UnitOn=dict_uniton_slow, # Committment statuses of committed units
+            dict_UnitStartUp=dict_UnitStartUp_slow, # Startup indicator, keys should be the same as dict_UnitOn
+            dict_UnitShutDn=dict_UnitShutDn_slow, # Shutdown indicator, keys should be the same as dict_UnitOn
+            dict_DispatchLimitsLower=dict_DispacthLimitsLower_slow, # Only apply for committed units, keys should be the same as dict_UnitOn
+            dict_DispatchLimitsUpper=dict_DispacthLimitsUpper_slow, # Only apply for committed units, keys should be the same as dict_UnitOn
+            dict_SigmaUp=dict_SigmaUp_slow,
+            dict_SigmaDn=dict_SigmaDn_slow,
+        )
+        msg = "RTUC Model {} created!".format(i_rtuc)
+        print msg
+        content += msg
+        content += '\n'
+
+        # Solve RTUC model
+        try:
+            results_RTC = optimizer.solve(ins_RTC)
+        except:
+            print 'Cannot solve RTUC model!'
+            IP()
+
+        if results_RTC.solver.termination_condition == TerminationCondition.infeasible:
+            print 'Infeasibility detected in the RTUC model!'
+            IP()
+        elif value(ins_RTC.SlackPenalty) > 1E-3:
+            print 'Infeasibility in the RTUC model, penalty: {}'.format(value(ins_RTC.SlackPenalty))
+            IP()
+        msg = (
+            'RTUC Model {} '
+            'solved at: {:>.2f} s, '
+            'objective: {:>.2f}, '
+            'penalty: {:s}'.format(
+            # 'penalty: {:>.2f}'.format(
+                i_rtuc, 
+                time() - t0,
+                value(ins_RTC.TotalCostObjective),
+                'N/A',
+                # value(ins_RTC.SlackPenalty),
+            )
+        )
+        print(msg)
+
+        dfs_RTC2RTD = return_downscaled_initial_condition(ins_RTC, nI_RTC, nI_RTD)
+        df_UNITON_RTC2RTD       = dfs_RTC2RTD.df_uniton
+        df_UNITSTUP_RTC2RTD     = dfs_RTC2RTD.df_unitstup
+        df_UNITSTDN_RTC2RTD     = dfs_RTC2RTD.df_unitstdn
+        df_dispatch_min_RTC2RTD = dfs_RTC2RTD.df_dispatch_min
+        df_dispatch_max_RTC2RTD = dfs_RTC2RTD.df_dispatch_max
+        df_SIGMAUP_RTC2RTD      = dfs_RTC2RTD.df_sigmaup
+        df_SIGMADN_RTC2RTD      = dfs_RTC2RTD.df_sigmadn
+
+        ls_t_ed = df_timesequence.loc[df_timesequence['RTC']==t_s_RTC, 'RTD'].values
+
+        # Convert RTC initial conditions into RTD initial conditions
+        dict_UnitOnT0State_RTD = (pd.Series(dict_UnitOnT0State_RTC)*nI_RTDperRTC).to_dict()
+        dict_PowerGeneratedT0_RTD = dict_PowerGeneratedT0_RTC
+
+        for t_s_RTD in ls_t_ed:
+            t_e_RTD = t_s_RTD + 5 # Total 6 ED intervals, 1 binding interval, 5 look-ahead interval, 30 min in total
+
+            dict_uniton_all = MyDataFrame(
+                df_UNITON_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
+            ).to_dict_2d()
+            dict_UnitStartUp_all = MyDataFrame(
+                df_UNITSTUP_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
+            ).to_dict_2d()
+            dict_UnitShutDn_all = MyDataFrame(
+                df_UNITSTDN_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
+            ).to_dict_2d()
+            dict_DispacthLimitsUpper_all = MyDataFrame(
+                df_dispatch_max_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
+            ).to_dict_2d()
+            dict_DispacthLimitsLower_all = MyDataFrame(
+                df_dispatch_min_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
+            ).to_dict_2d()
+            dict_SigmaUp_all = MyDataFrame(
+                df_SIGMAUP_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
+            ).to_dict_2d()
+            dict_SigmaDn_all = MyDataFrame(
+                df_SIGMADN_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
+            ).to_dict_2d()
+
+            # Create RTED model
+            ins_RTD = create_model(
+                network,
+                df_busload_RTD.loc[t_s_RTD: t_e_RTD, :], # Only bus load, first dimension time starts from 1, no total load
+                df_genfor_RTD.loc[t_s_RTD: t_e_RTD, :], # Only generation from nonthermal gens, first dim time starts from 1
+                nI_RTD, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
+                dict_UnitOnT0State=dict_UnitOnT0State_RTD, # How many time periods the units have been on at T0 from last RTUC model
+                dict_PowerGeneratedT0=dict_PowerGeneratedT0_RTD, # Initial power generation level at T0 from last RTUC model
+                ##############################
+                dict_UnitOn=dict_uniton_all, # Committment statuses of committed units
+                dict_UnitStartUp=dict_UnitStartUp_all, # Startup indicator, keys should be the same as dict_UnitOn
+                dict_UnitShutDn=dict_UnitShutDn_all, # Shutdown indicator, keys should be the same as dict_UnitOn
+                dict_DispatchLimitsLower=dict_DispacthLimitsLower_all, # Only apply for committed units, keys should be the same as dict_UnitOn
+                dict_DispatchLimitsUpper=dict_DispacthLimitsUpper_all, # Only apply for committed units, keys should be the same as dict_UnitOn
+                dict_SigmaUp=dict_SigmaUp_all,
+                dict_SigmaDn=dict_SigmaDn_all,
+            )
+            # msg = "RTED Model {} created!".format(t_s_RTD)
+            # print msg
+            # content += msg
+            # content += '\n'
+
+            # Solve RTUC model
+            try:
+                results_RTD = optimizer.solve(ins_RTD)
+            except:
+                print 'Cannot solve RTED model!'
+                IP()
+
+            if results_RTD.solver.termination_condition == TerminationCondition.infeasible:
+                print 'Infeasibility detected in the RTED model!'
+            msg = (
+                '    '
+                'RTED Model {} '
+                'solved at: {:>.2f} s, '
+                'objective: {:>.2f}, '
+                'penalty: {:>.2f}'.format(
+                    t_s_RTD, 
+                    time() - t0,
+                    value(ins_RTD.TotalCostObjective),
+                    value(ins_RTD.SlackPenalty),
+                )
+            )
+            print msg
+
+            # End of the AGC loop
+            ####################################################################
+
+            # Extract initial parameters from the binding interval for the next RTED run
+            dict_UnitOnT0State_RTD = return_unitont0state(
+                ins_RTD, ins_RTD.TimePeriods.first()
+            )
+            # dict_PowerGeneratedT0_ed = return_powergenerated_t(
+            #     ins_ed, ins_ed.TimePeriods.first()
+            # )
+            dict_PowerGeneratedT0_RTD = df_AGC_SCHEDULE.loc[t_AGC, network.dict_set_gens['THERMAL']].to_dict()
+
+
+        # Extract initial parameters from the binding interval of the last ED run for the next RTUC run
+        dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State_RTD)/nI_RTDperRTC).to_dict()
+        # dict_UnitOnT0State_RTC = return_unitont0state(ins_RTD, ins_RTD.TimePeriods.first())
+        dict_PowerGeneratedT0_RTC = dict_PowerGeneratedT0_RTD
+
 def test_dauc(casename, showing_gens='problematic'):
     t0 = time()
     content = ''
@@ -719,6 +1217,7 @@ def test_dauc(casename, showing_gens='problematic'):
     print(msg)
     content += msg
     content += '\n'
+    # IP()
 
     # For debugging purpose only, normally, all slack variables should be 0
     print 'Non-zero slack variables:'
@@ -835,7 +1334,7 @@ def test_dauc(casename, showing_gens='problematic'):
         ).to_dict_2d()
 
         # Create RTUC model
-        IP()
+        # IP()
         ins_RTC = create_model(
             network,
             df_busload_RTC.loc[t_s_RTC: t_e_RTC, :], # Only bus load, first dimension time starts from 1, no total load
@@ -869,6 +1368,17 @@ def test_dauc(casename, showing_gens='problematic'):
             IP()
         elif value(ins_RTC.SlackPenalty) > 1E-3:
             print 'Infeasibility in the RTUC model, penalty: {}'.format(value(ins_RTC.SlackPenalty))
+            ls_slackvar_name = [
+                'Slack_startup_lower',   'Slack_startup_upper', 
+                'Slack_shutdown_lower',  'Slack_shutdown_upper', 
+                'Slack_overlap_startup', 'Slack_overlap_shutdown', 
+                'Slack_rampup',          'Slack_rampdn',
+            ]
+            for slackvar_name in ls_slackvar_name:
+                slackvar = getattr(ins_RTC, slackvar_name)
+                for k in slackvar.iterkeys():
+                    if value(slackvar[k]) > 0:
+                        print slackvar_name, k, value(slackvar[k])
             IP()
         msg = (
             'RTUC Model {} '
@@ -891,6 +1401,8 @@ def test_dauc(casename, showing_gens='problematic'):
         df_UNITSTDN_RTC2RTD     = dfs_RTC2RTD.df_unitstdn
         df_dispatch_min_RTC2RTD = dfs_RTC2RTD.df_dispatch_min
         df_dispatch_max_RTC2RTD = dfs_RTC2RTD.df_dispatch_max
+        df_SIGMAUP_RTC2RTD      = dfs_RTC2RTD.df_sigmaup
+        df_SIGMADN_RTC2RTD      = dfs_RTC2RTD.df_sigmadn
 
         ls_t_ed = df_timesequence.loc[df_timesequence['RTC']==t_s_RTC, 'RTD'].values
 
@@ -916,6 +1428,12 @@ def test_dauc(casename, showing_gens='problematic'):
             dict_DispacthLimitsLower_all = MyDataFrame(
                 df_dispatch_min_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
             ).to_dict_2d()
+            dict_SigmaUp_all = MyDataFrame(
+                df_SIGMAUP_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
+            ).to_dict_2d()
+            dict_SigmaDn_all = MyDataFrame(
+                df_SIGMADN_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
+            ).to_dict_2d()
 
             # Create RTED model
             ins_RTD = create_model(
@@ -931,6 +1449,8 @@ def test_dauc(casename, showing_gens='problematic'):
                 dict_UnitShutDn=dict_UnitShutDn_all, # Shutdown indicator, keys should be the same as dict_UnitOn
                 dict_DispatchLimitsLower=dict_DispacthLimitsLower_all, # Only apply for committed units, keys should be the same as dict_UnitOn
                 dict_DispatchLimitsUpper=dict_DispacthLimitsUpper_all, # Only apply for committed units, keys should be the same as dict_UnitOn
+                dict_SigmaUp=dict_SigmaUp_all,
+                dict_SigmaDn=dict_SigmaDn_all,
             )
             # msg = "RTED Model {} created!".format(t_s_RTD)
             # print msg
@@ -946,6 +1466,22 @@ def test_dauc(casename, showing_gens='problematic'):
 
             if results_RTD.solver.termination_condition == TerminationCondition.infeasible:
                 print 'Infeasibility detected in the RTED model!'
+                IP()
+            elif value(ins_RTD.SlackPenalty) > 1E-3:
+                print 'Infeasibility in the RTED model, penalty: {}'.format(value(ins_RTD.SlackPenalty))
+                ls_slackvar_name = [
+                    'Slack_startup_lower',   'Slack_startup_upper', 
+                    'Slack_shutdown_lower',  'Slack_shutdown_upper', 
+                    'Slack_overlap_startup', 'Slack_overlap_shutdown', 
+                    'Slack_rampup',          'Slack_rampdn',
+                ]
+                for slackvar_name in ls_slackvar_name:
+                    slackvar = getattr(ins_RTD, slackvar_name)
+                    for k in slackvar.iterkeys():
+                        if value(slackvar[k]) > 0:
+                            print attr, k, value(slackvar[k])
+                IP()
+
             msg = (
                 '    '
                 'RTED Model {} '
@@ -1252,4 +1788,5 @@ def test_dauc(casename, showing_gens='problematic'):
 
 if __name__ == '__main__':
     test_dauc('118')
+    # debug_UC('118')
 

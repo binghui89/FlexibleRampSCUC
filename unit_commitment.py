@@ -330,11 +330,13 @@ def thermal_gen_rampdn_rule(m, g, t):
     ramp_per_interval = m.RampDownLimitPerHour[g]/m.nI # m.RampDownLimitPerHour[g] is ramp rate per hour
     Tsd = m.ShutdownHour[g]*m.nI # m.ShutdownHour is in hour
     if t is m.TimePeriods.first():
-        power_last_period = m.PowerGeneratedT0[g]
+        power_last_period  = m.PowerGeneratedT0[g]
+        uniton_last_period = m.UnitOnT0[g]
     else:
         t_prev = m.TimePeriods.prev(t)
-        power_last_period = m.PowerGenerated[g, t_prev]
-    return power_last_period - m.PowerGenerated[g, t] - m.Slack_rampdn[g, t] <= (m.SigmaDn[g,t] + m.UnitShutDn[g,t])*m.MinimumPowerOutput[g]/Tsd + ramp_per_interval*(m.UnitOn[g, t] - m.SigmaDn[g, t]) 
+        power_last_period  = m.PowerGenerated[g, t_prev]
+        uniton_last_period = m.UnitOn[g, t_prev]
+    return power_last_period - m.PowerGenerated[g, t] - m.Slack_rampdn[g, t] <= (m.SigmaDn[g,t] + m.UnitShutDn[g,t])*m.MaximumPowerOutput[g] + ramp_per_interval*(uniton_last_period - m.SigmaDn[g, t]) 
 
 def thermal_gen_startup_shutdown_rule(m, g, t):
     if t is m.TimePeriods.first():
