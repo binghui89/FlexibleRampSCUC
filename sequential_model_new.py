@@ -223,6 +223,16 @@ def return_downscaled_initial_condition(instance, nI_L, nI_S):
         index=tindex_S, 
         columns=ls_gen_therm,
     )
+    df_SIGMAUP_L2S = pd.DataFrame(
+        ar_SIGMAUP_L2S,
+        index=tindex_S, 
+        columns=ls_gen_therm,
+    )
+    df_SIGMADN_L2S = pd.DataFrame(
+        ar_SIGMADN_L2S,
+        index=tindex_S, 
+        columns=ls_gen_therm,
+    )
 
     df_result = GroupDataFrame()
     df_result.df_uniton = df_UNITON_L2S
@@ -230,6 +240,8 @@ def return_downscaled_initial_condition(instance, nI_L, nI_S):
     df_result.df_unitstdn = df_UNITSTDN_L2S
     df_result.df_dispatch_min = df_dispatch_min_L2S
     df_result.df_dispatch_max = df_dispatch_max_L2S
+    df_result.df_sigmaup = df_SIGMAUP_L2S
+    df_result.df_sigmadn = df_SIGMADN_L2S
     return df_result
 
 def build_118_network():
@@ -789,6 +801,8 @@ def test_dauc(casename, showing_gens='problematic'):
     df_UNITSTDN_DAC2RTC     = dfs_DAC2RTC.df_unitstdn
     df_dispatch_min_DAC2RTC = dfs_DAC2RTC.df_dispatch_min
     df_dispatch_max_DAC2RTC = dfs_DAC2RTC.df_dispatch_max
+    df_SIGMAUP_DAC2RTC      = dfs_DAC2RTC.df_sigmaup
+    df_SIGMADN_DAC2RTC      = dfs_DAC2RTC.df_sigmadn
 
     # Convert DAC initial conditions into RTC initial conditions
     dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State)*nI_RTCperDAC).to_dict()
@@ -813,6 +827,12 @@ def test_dauc(casename, showing_gens='problematic'):
         dict_DispacthLimitsLower_slow = MyDataFrame(
             df_dispatch_min_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
         ).to_dict_2d()
+        dict_SigmaUp_slow = MyDataFrame(
+            df_SIGMAUP_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
+        dict_SigmaDn_slow = MyDataFrame(
+            df_SIGMADN_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
+        ).to_dict_2d()
 
         # Create RTUC model
         IP()
@@ -829,6 +849,8 @@ def test_dauc(casename, showing_gens='problematic'):
             dict_UnitShutDn=dict_UnitShutDn_slow, # Shutdown indicator, keys should be the same as dict_UnitOn
             dict_DispatchLimitsLower=dict_DispacthLimitsLower_slow, # Only apply for committed units, keys should be the same as dict_UnitOn
             dict_DispatchLimitsUpper=dict_DispacthLimitsUpper_slow, # Only apply for committed units, keys should be the same as dict_UnitOn
+            dict_SigmaUp=dict_SigmaUp_slow,
+            dict_SigmaDn=dict_SigmaDn_slow,
         )
         msg = "RTUC Model {} created!".format(i_rtuc)
         print msg
@@ -844,6 +866,10 @@ def test_dauc(casename, showing_gens='problematic'):
 
         if results_RTC.solver.termination_condition == TerminationCondition.infeasible:
             print 'Infeasibility detected in the RTUC model!'
+            IP()
+        elif value(ins_RTC.SlackPenalty) > 1E-3:
+            print 'Infeasibility in the RTUC model, penalty: {}'.format(value(ins_RTC.SlackPenalty))
+            IP()
         msg = (
             'RTUC Model {} '
             'solved at: {:>.2f} s, '
