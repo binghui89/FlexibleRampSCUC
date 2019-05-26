@@ -72,43 +72,49 @@ def sigma_up_rule(m, g, t):
     NT = value(m.NumTimePeriods)
     Tsu = value(m.StartupHour[g]*m.nI) # m.StartupHour is in hour
     TU0 = value(m.UnitOnT0State[g])
-    if (t >= t1 + (Tsu - 1)) and (NT >= Tsu):
-        # Start-up period from (t - Tsu + 1) to t
-        return sum(
-            m.UnitStartUp[g, t - i + 1]
-            for i in range(1, Tsu + 1 )
-        )
-    elif (value(m.UnitOnT0[g]) == 1) and (TU0 < Tsu ) and (t <= t1 + Tsu - TU0 - 1):
-        # Unit is starting up, and (t1 + Tsu - TU0 - 1) is the last starting up period
-        # print g, t
-        return 1
+    if (g, t) in m.SigmaUp:
+        return m.SigmaUp[g, t]
     else:
-        # Unit is not starting up, and the start-up period goes beyond the 
-        # first interval.
-        return sum(
-            m.UnitStartUp[g, t - i + 1]
-            for i in range(1, (t-t1+1) + 1 ) # t-t1+1 is the number of intervals from t1 to t
-        )
+        if (t >= t1 + (Tsu - 1)) and (NT >= Tsu):
+            # Start-up period from (t - Tsu + 1) to t
+            return sum(
+                m.UnitStartUp[g, t - i + 1]
+                for i in range(1, Tsu + 1 )
+            )
+        elif (value(m.UnitOnT0[g]) == 1) and (TU0 < Tsu ) and (t <= t1 + Tsu - TU0 - 1):
+            # Unit is starting up, and (t1 + Tsu - TU0 - 1) is the last starting up period
+            # print g, t
+            return 1
+        else:
+            # Unit is not starting up, and the start-up period goes beyond the 
+            # first interval.
+            return sum(
+                m.UnitStartUp[g, t - i + 1]
+                for i in range(1, (t-t1+1) + 1 ) # t-t1+1 is the number of intervals from t1 to t
+            )
 
 def sigma_dn_rule(m, g, t):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
     NT  = value(m.NumTimePeriods)
     Tsd = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
-    if (t <= te - Tsd) and (NT > Tsd):
-        return sum(
-            m.UnitShutDn[g, t + i]
-            for i in range(1, Tsd + 1 )
-        )
-    elif t < te:
-        return sum(
-            m.UnitShutDn[g, t + i]
-            for i in range(1, te - t + 1 )
-        )
+    if (g, t) in m.dict_SigmaDn:
+        return m.dict_SigmaDn[g, t]
     else:
-        # The last period, we don't know what's the value of the shut-down 
-        # indicator of the next interval, so it's always 0.
-        return 0
+        if (t <= te - Tsd) and (NT > Tsd):
+            return sum(
+                m.UnitShutDn[g, t + i]
+                for i in range(1, Tsd + 1 )
+            )
+        elif t < te:
+            return sum(
+                m.UnitShutDn[g, t + i]
+                for i in range(1, te - t + 1 )
+            )
+        else:
+            # The last period, we don't know what's the value of the shut-down 
+            # indicator of the next interval, so it's always 0.
+            return 0
 
 def sigma_power_times_up_rule(m, g, t):
     t1 = m.TimePeriods.first()
@@ -180,7 +186,7 @@ def sigma_power_times_dn_initial_rule(m, g):
 
 def set_initial_shutdown_power_limits_rule(m):
     set_gen = set()
-    for g in m.ThermalGenerators:
+    for g in m.ThermalGenerators_uncommit:
         Tsd = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
         if value(m.UnitOnT0State[g]) >= Tsd:
             set_gen.add(g)
@@ -649,26 +655,26 @@ def SlackPenalty_rule(m):
     return 10000000*sum(
        m.OverCommit[t] +
        sum(
-            m.Slack_startup_lower[g, t] +
-            m.Slack_startup_upper[g, t] +
-            m.Slack_shutdown_lower[g, t] +
-            m.Slack_shutdown_upper[g, t] +
-            m.Slack_overlap_startup[g, t] +
-            m.Slack_overlap_shutdown[g, t] +
-            m.Slack_rampup[g, t] +
-            m.Slack_rampdn[g, t]
+            m.Slack_startup_lower[g, t] 
+            + m.Slack_startup_upper[g, t] 
+            + m.Slack_shutdown_lower[g, t] 
+            + m.Slack_shutdown_upper[g, t] 
+            + m.Slack_overlap_startup[g, t] 
+            + m.Slack_overlap_shutdown[g, t] 
+            + m.Slack_rampup[g, t] 
+            + m.Slack_rampdn[g, t]
            for g in m.ThermalGenerators
-       )
+       ) 
        for t in m.TimePeriods
    )
 
 # Objectives
 def total_cost_objective_rule(m):
     return (
-        m.TotalProductionCost + 
-        m.TotalFixedCost + 
-        m.TotalCurtailmentCost + 
-        m.TotalReserveShortageCost
+        m.TotalProductionCost 
+        + m.TotalFixedCost 
+        + m.TotalCurtailmentCost 
+        + m.TotalReserveShortageCost
     ) + m.SlackPenalty
 
 # Additional dispatch limits for RTUC
@@ -693,6 +699,10 @@ def create_model(
     dict_UnitShutDn=None, # Shutdown indicator, keys should be the same as dict_UnitOn
     dict_DispatchLimitsLower=None, # Only apply for committed units, keys should be the same as dict_UnitOn
     dict_DispatchLimitsUpper=None, # Only apply for committed units, keys should be the same as dict_UnitOn
+    dict_SigmaUp=None,
+    dict_SigmaDn=None,
+    # dict_SigmaPowerTimesUp=None,
+    # dict_SigmaPowerTimesDn=None,
     ##############################
     binary_mode=True, # This switch forces gen start-up/shut-down indicator to be binary, can be relaxed to improve time performance
 ):
@@ -1110,6 +1120,8 @@ def create_model(
     # actual variable instead of expression?
     ############################################
 
+    model.dict_SigmaUp = dict_SigmaUp if dict_SigmaUp else dict()
+    model.dict_SigmaDn = dict_SigmaDn if dict_SigmaDn else dict()
     model.SigmaUp = Expression(
         model.ThermalGenerators,
         model.TimePeriods,
