@@ -1,14 +1,15 @@
 import os, pandas as pd
 from IPython import embed as IP
 
-def import_scenario_data(print_error=False):
+def import_scenario_data(dir_scenario=None, print_error=False):
 
     # File locations
     dir_TX2kB = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B'
     f_gen     = os.path.sep.join( [dir_TX2kB, 'generator_data_plexos_withRT.csv'] )
     f_genfor  = os.path.sep.join( [dir_TX2kB, 'generator.csv'] )
     f_genwind = os.path.sep.join( [dir_TX2kB, 'wind_generator_data.csv'] )
-    dir_scenario = '/home/bxl180002/git/WindScenarioGeneration/scenario_data'
+    if not dir_scenario:
+        dir_scenario = '/home/bxl180002/git/WindScenarioGeneration/scenario_data'
 
     # Names of scenarios, and names of columns of scenarios
     scenario_col_names = [
@@ -72,8 +73,8 @@ def import_scenario_data(print_error=False):
             if s not in WindPowerForecast:
                 WindPowerForecast[s] = dict()
             for h in range(1, 25): # The time index in the UC model is from 1 to 24
-                tmp_data = df_tmp.loc[h-1, c] # Hopefully there is only one element
-                WindPowerForecast[s][w, h] = output_scaler*tmp_data
+                tmp_data = df_tmp.at[h-1, c] # Hopefully there is only one element
+                WindPowerForecast[s][w, h] = cap_scaler*tmp_data
 
         # xa and xf are the actual and deterministic forecasted data
         for c in ['xa', 'xf']:
@@ -82,7 +83,7 @@ def import_scenario_data(print_error=False):
                 WindPowerForecast[c] = dict()
             for h in range(1, 25):
                 tmp_data = df_tmp.loc[h-1, c]
-                WindPowerForecast[s][w, h] = output_scaler*tmp_data
+                WindPowerForecast[s][w, h] = cap_scaler*tmp_data
     # print "Scenario data created!"
     return scenario_names, WindPowerForecast
 
