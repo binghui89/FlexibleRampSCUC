@@ -2297,7 +2297,7 @@ print('Done with all dictionaries')
 
 # Reserve Parameters
 ReserveFactor = 0.1
-RegulatingReserveFactor = 0.05
+RegulatingReserveFactor = 0.02
 
 # Minimum and maximum generation levels, for each thermal generator in MW.
 # could easily be specified on a per-time period basis, but are not currently.
