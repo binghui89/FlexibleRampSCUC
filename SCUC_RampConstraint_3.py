@@ -38,7 +38,7 @@ import numpy as np
 from pyomo.environ import *
 from pyomo.opt import SolverFactory
 from IPython import embed as IP
-
+from helper import import_scenario_data
 
 
 
@@ -2788,18 +2788,21 @@ def create_model():
     # The global system demand, for each time period. units are MW.
     model.Demand = Param(
         model.TimePeriods,
-        within=NonNegativeReals, initialize=load_df['LOAD'].to_dict()
+        within=NonNegativeReals, initialize=load_df['LOAD'].to_dict(),
+        mutable=True
     )
 
     # The bus-by-bus demand and value of loss load, for each time period. units are MW and $/MW.
     model.BusDemand = Param(
         model.LoadBuses, model.TimePeriods,
-        within=NonNegativeReals, initialize=load_dict
+        within=NonNegativeReals, initialize=load_dict,
+        mutable=True
     )
     model.BusVOLL = Param(
         model.LoadBuses,
         within=NonNegativeReals,
-        initialize=bus_df[ bus_df['PD']>0 ][ 'VOLL' ].to_dict()
+        initialize=bus_df[ bus_df['PD']>0 ][ 'VOLL' ].to_dict(),
+        mutable=True
     )
 
     # Power forecasts for renewables indexed by (gen, time)
@@ -3208,13 +3211,15 @@ def create_dispatch_model(dict_uniton):
     # The global system demand, for each time period. units are MW.
     model.Demand = Param(
         model.TimePeriods,
-        within=NonNegativeReals, initialize=load_df['LOAD'].to_dict()
+        within=NonNegativeReals, initialize=load_df['LOAD'].to_dict(),
+        mutable=True
     )
 
     # The bus-by-bus demand and value of loss load, for each time period. units are MW and $/MW.
     model.BusDemand = Param(
         model.LoadBuses, model.TimePeriods,
-        within=NonNegativeReals, initialize=load_dict
+        within=NonNegativeReals, initialize=load_dict,
+        mutable=True
     )
     model.BusVOLL = Param(
         model.LoadBuses,
@@ -3555,3 +3560,51 @@ def create_dispatch_model(dict_uniton):
     )
 
     return model
+
+def update_model(instance, season):
+    if not season:
+        return instance
+    else:
+        csv_load  = data_path + 'loads_' + season + '.csv'
+        csv_solar = data_path + 'solar_' + season + '.csv'
+        dir_scenario='/home/bxl180002/git/WindScenarioGeneration/'+ season
+        sname, sdata = import_scenario_data(dir_scenario=dir_scenario)
+
+    df_load = pd.read_csv(csv_load, index_col=0)
+    df_load.reset_index(drop=True, inplace=True)
+    df_busload = df_load.loc[:, df_load.columns.difference(['LOAD'])]
+    dict_loadtotal = dict()
+    dict_busload = dict()
+    for i, row in df_busload.iterrows():
+        for b in df_busload.columns:
+            dict_busload[b, i+1] = df_busload.loc[i, b]
+    df_load_total = df_load.loc[:, 'LOAD'].reset_index()
+    for i, row in df_load_total.iterrows():
+        dict_loadtotal[i+1] = df_load_total.loc[i, 'LOAD']
+    
+    df_solar = pd.read_csv(csv_solar, index_col=0)
+    df_solar.reset_index(drop=True, inplace=True)
+    dict_solar = dict()
+    for i, row in df_solar.iterrows():
+        for g in df_solar.columns:
+            dict_solar[g, i+1] = df_solar.loc[i, g]
+
+    instance.PowerForecast.store_values(dict_solar)
+    instance.PowerForecast.store_values(sdata['xa'])
+    instance.BusDemand.store_values(dict_busload)
+    instance.Demand.store_values(dict_loadtotal)
+
+    instance.SpinningReserveRequirement.reconstruct()
+    instance.RegulatingReserveRequirement.reconstruct()
+    
+    return instance
+
+
+
+if __name__ == '__main__':
+    # Test model updating function
+    model = create_model()
+    model = update_model(model, 'season1')
+    opt = SolverFactory('cplex')
+    results = opt.solve(model)
+    print results
