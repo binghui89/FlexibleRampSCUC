@@ -12,6 +12,7 @@ from unit_commitment import GroupDataFrame, MyDataFrame, NewNetwork, create_mode
 
 def return_unitont0state(instance, t=None):
     # Find number of online/offline time intervals of thermal gens at the end of period t
+    # Copied from sequential_model.py
     if not t:
         t = instance.TimePeriods.last()
     elif t not in instance.TimePeriods:
@@ -29,6 +30,21 @@ def return_unitont0state(instance, t=None):
                 t_off = (1-b)*(t_off + 1 - b) # Number of the last consecutive offline intervals
         dict_results[g] = int(round(sign(t_on)*t_on - sign(t_off)*t_off)) # This is an integer?
     return dict_results
+
+def return_powergenerated_t(instance, t=None):
+    # Find power generation levels after period t
+    # Copied from sequential_model.py
+    if not t:
+        t = instance.TimePeriods.last()
+    elif t not in instance.TimePeriods:
+        print "WARNING: NO POWER_GENERATED CREATED."
+        return None
+    dict_results = dict()
+    for g in instance.AllGenerators.iterkeys():
+        v = value(instance.PowerGenerated[g, t])
+        dict_results[g] = max(0, v) # Sometimes it returns negative values, dunno why.
+    return dict_results
+
 
 def return_downscaled_initial_condition(instance, nI_L, nI_S):
     '''
@@ -884,18 +900,29 @@ def debug_UC(casename):
             IP()
         elif value(ins_RTC.SlackPenalty) > 1E-3:
             print 'Infeasibility in the RTUC model, penalty: {}'.format(value(ins_RTC.SlackPenalty))
+            ls_slackvar_name = [
+                'Slack_startup_lower',   'Slack_startup_upper', 
+                'Slack_shutdown_lower',  'Slack_shutdown_upper', 
+                'Slack_overlap_startup', 'Slack_overlap_shutdown', 
+                'Slack_rampup',          'Slack_rampdn',
+            ]
+            for slackvar_name in ls_slackvar_name:
+                slackvar = getattr(ins_RTC, slackvar_name)
+                for k in slackvar.iterkeys():
+                    if value(slackvar[k]) > 0:
+                        print slackvar_name, k, value(slackvar[k])
             IP()
         msg = (
             'RTUC Model {} '
             'solved at: {:>.2f} s, '
             'objective: {:>.2f}, '
-            'penalty: {:s}'.format(
-            # 'penalty: {:>.2f}'.format(
+            # 'penalty: {:s}'.format(
+            'penalty: {:>.2f}'.format(
                 i_rtuc, 
                 time() - t0,
                 value(ins_RTC.TotalCostObjective),
-                'N/A',
-                # value(ins_RTC.SlackPenalty),
+                # 'N/A',
+                value(ins_RTC.SlackPenalty),
             )
         )
         print(msg)
@@ -971,6 +998,22 @@ def debug_UC(casename):
 
             if results_RTD.solver.termination_condition == TerminationCondition.infeasible:
                 print 'Infeasibility detected in the RTED model!'
+                IP()
+            elif value(ins_RTD.SlackPenalty) > 1E-3:
+                print 'Infeasibility in the RTED model, penalty: {}'.format(value(ins_RTD.SlackPenalty))
+                ls_slackvar_name = [
+                    'Slack_startup_lower',   'Slack_startup_upper', 
+                    'Slack_shutdown_lower',  'Slack_shutdown_upper', 
+                    'Slack_overlap_startup', 'Slack_overlap_shutdown', 
+                    'Slack_rampup',          'Slack_rampdn',
+                ]
+                for slackvar_name in ls_slackvar_name:
+                    slackvar = getattr(ins_RTD, slackvar_name)
+                    for k in slackvar.iterkeys():
+                        if value(slackvar[k]) > 0:
+                            print attr, k, value(slackvar[k])
+                IP()
+
             msg = (
                 '    '
                 'RTED Model {} '
@@ -992,10 +1035,11 @@ def debug_UC(casename):
             dict_UnitOnT0State_RTD = return_unitont0state(
                 ins_RTD, ins_RTD.TimePeriods.first()
             )
-            # dict_PowerGeneratedT0_ed = return_powergenerated_t(
-            #     ins_ed, ins_ed.TimePeriods.first()
-            # )
-            dict_PowerGeneratedT0_RTD = df_AGC_SCHEDULE.loc[t_AGC, network.dict_set_gens['THERMAL']].to_dict()
+            dict_PowerGeneratedT0_RTD = return_powergenerated_t(
+                ins_RTD, ins_RTD.TimePeriods.first()
+            )
+            # IP()
+            # dict_PowerGeneratedT0_RTD = df_AGC_SCHEDULE.loc[t_AGC, network.dict_set_gens['THERMAL']].to_dict()
 
 
         # Extract initial parameters from the binding interval of the last ED run for the next RTUC run
@@ -1787,6 +1831,6 @@ def test_dauc(casename, showing_gens='problematic'):
 
 
 if __name__ == '__main__':
-    test_dauc('118')
-    # debug_UC('118')
+    # test_dauc('118')
+    debug_UC('118')
 
