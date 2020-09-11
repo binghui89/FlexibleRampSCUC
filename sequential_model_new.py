@@ -133,13 +133,23 @@ def return_downscaled_initial_condition(instance, nI_L, nI_S):
     #     columns=df_unitonaug.columns,
     # ).astype(int)
 
-    # NOTE: np array's index starts from 0
+    # Note: np array's index starts from 0
     ar_UNITSTUP_L2S = np.zeros((tindex_S.size, nG_therm), dtype=int)
     ar_UNITSTDN_L2S = np.zeros((tindex_S.size, nG_therm), dtype=int)
-    ar_UNITSTUP_L2S[(tindex_L-1)*nI_SperL, :] = df_UNITSTUP_L.values
-    ar_UNITSTDN_L2S[tindex_L*nI_SperL-1, :]   = df_UNITSTDN_L.values
+    df_UNITSTUP_L2S = pd.DataFrame(
+        ar_UNITSTUP_L2S,
+        index=tindex_S, 
+        columns=ls_gen_therm,
+    )
+    df_UNITSTDN_L2S = pd.DataFrame(
+        ar_UNITSTDN_L2S,
+        index=tindex_S, 
+        columns=ls_gen_therm,
+    )
+    df_UNITSTUP_L2S.loc[(tindex_L-1)*nI_SperL+1,:] = df_UNITSTUP_L.values # ar_UNITSTUP_L2S[(tindex_L-1)*nI_SperL, :] = df_UNITSTUP_L.values
+    df_UNITSTDN_L2S.loc[tindex_L*nI_SperL, :] = df_UNITSTDN_L.values # ar_UNITSTDN_L2S[tindex_L*nI_SperL-1, :]   = df_UNITSTDN_L.values
 
-    ar_UNITON_L2S = (df_UNITON_L+df_UNITSTDN_L).values.astype(int).repeat(nI_SperL, axis=0) - ar_UNITSTDN_L2S
+    ar_UNITON_L2S = (df_UNITON_L+df_UNITSTDN_L).values.astype(int).repeat(nI_SperL, axis=0) - df_UNITSTDN_L2S.values.astype(int) # ar_UNITON_L2S = (df_UNITON_L+df_UNITSTDN_L).values.astype(int).repeat(nI_SperL, axis=0) - ar_UNITSTDN_L2S
 
     ar_SIGMAUP_L2S = df_SIGMAUP_L.astype(int).values.repeat(nI_SperL, axis=0)
     ar_SIGMADN_L2S = np.concatenate(
@@ -163,7 +173,7 @@ def return_downscaled_initial_condition(instance, nI_L, nI_S):
     ar_is_shuttingdown_L2S = np.concatenate([df_SIGMADNT0_L.values, ar_SIGMADN_L2S], axis=0)[0:-1]
     ar_is_up_L2S = np.maximum(
         0,
-        ar_UNITON_L2S + ar_UNITSTDN_L2S 
+        ar_UNITON_L2S + df_UNITSTDN_L2S.values # ar_UNITSTDN_L2S 
         - ar_is_startingup_L2S 
         - ar_is_shuttingdown_L2S
     )
@@ -233,16 +243,16 @@ def return_downscaled_initial_condition(instance, nI_L, nI_S):
         index=tindex_S, 
         columns=ls_gen_therm,
     )
-    df_UNITSTUP_L2S = pd.DataFrame(
-        ar_UNITSTUP_L2S,
-        index=tindex_S, 
-        columns=ls_gen_therm,
-    )
-    df_UNITSTDN_L2S = pd.DataFrame(
-        ar_UNITSTDN_L2S,
-        index=tindex_S, 
-        columns=ls_gen_therm,
-    )
+    # df_UNITSTUP_L2S = pd.DataFrame(
+    #     ar_UNITSTUP_L2S,
+    #     index=tindex_S, 
+    #     columns=ls_gen_therm,
+    # )
+    # df_UNITSTDN_L2S = pd.DataFrame(
+    #     ar_UNITSTDN_L2S,
+    #     index=tindex_S, 
+    #     columns=ls_gen_therm,
+    # )
     df_dispatch_max_L2S = pd.DataFrame(
         ar_dispatch_max_S,
         index=tindex_S, 
@@ -839,7 +849,7 @@ def debug_UC(casename):
     dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State)*nI_RTCperDAC).to_dict()
     dict_PowerGeneratedT0_RTC = dict_PowerGeneratedT0
 
-    for i_rtuc in np.arange(1, 2):
+    for i_rtuc in np.arange(1, 94):
         t_s_RTC = i_rtuc # 4*(i_rtuc-1) + 1
         t_e_RTC   = i_rtuc + 3 # 4*i_rtuc
 
@@ -1042,9 +1052,10 @@ def debug_UC(casename):
             # dict_PowerGeneratedT0_RTD = df_AGC_SCHEDULE.loc[t_AGC, network.dict_set_gens['THERMAL']].to_dict()
 
 
+        # IP()
         # Extract initial parameters from the binding interval of the last ED run for the next RTUC run
-        dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State_RTD)/nI_RTDperRTC).to_dict()
-        # dict_UnitOnT0State_RTC = return_unitont0state(ins_RTD, ins_RTD.TimePeriods.first())
+        # dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State_RTD)/nI_RTDperRTC).to_dict()
+        dict_UnitOnT0State_RTC = return_unitont0state(ins_RTC, ins_RTC.TimePeriods.first())
         dict_PowerGeneratedT0_RTC = dict_PowerGeneratedT0_RTD
 
 def test_dauc(casename, showing_gens='problematic'):
