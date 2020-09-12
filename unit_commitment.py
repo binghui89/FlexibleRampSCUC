@@ -707,6 +707,7 @@ def create_model(
     # dict_SigmaPowerTimesDn=None,
     ##############################
     binary_mode=True, # This switch forces gen start-up/shut-down indicator to be binary, can be relaxed to improve time performance
+    flow_limits=True,
 ):
     model = ConcreteModel()
     model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
@@ -1305,21 +1306,22 @@ def create_model(
     #############################################
     # constraints for line capacity limits #
     #############################################
-    model.LineFlow = Expression(
-        model.EnforcedBranches,
-        model.TimePeriods,
-        rule=line_flow_rule
-    )
-    model.EnforceLineCapacityLimitsA = Constraint(
-        model.EnforcedBranches, 
-        model.TimePeriods, 
-        rule=enforce_line_capacity_limits_rule_a
-    )   
-    model.EnforceLineCapacityLimitsB = Constraint(
-        model.EnforcedBranches, 
-        model.TimePeriods, 
-        rule=enforce_line_capacity_limits_rule_b
-    )
+    if flow_limits:
+        model.LineFlow = Expression(
+            model.EnforcedBranches,
+            model.TimePeriods,
+            rule=line_flow_rule
+        )
+        model.EnforceLineCapacityLimitsA = Constraint(
+            model.EnforcedBranches, 
+            model.TimePeriods, 
+            rule=enforce_line_capacity_limits_rule_a
+        )   
+        model.EnforceLineCapacityLimitsB = Constraint(
+            model.EnforcedBranches, 
+            model.TimePeriods, 
+            rule=enforce_line_capacity_limits_rule_b
+        )
 
     #############################################
     # Minimum online/offline time constriants #
@@ -1859,6 +1861,7 @@ def test_dauc(casename, showing_gens='problematic'):
         nI=1,
         dict_UnitOnT0State=dict_UnitOnT0State,
         dict_PowerGeneratedT0=dict_PowerGeneratedT0,
+        # flow_limits=False,
     )
     msg = 'Model created at: {:>.2f} s'.format(time() - t0)
     print(msg)
