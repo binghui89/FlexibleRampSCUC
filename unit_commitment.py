@@ -707,7 +707,7 @@ def create_model(
     # dict_SigmaPowerTimesDn=None,
     ##############################
     binary_mode=True, # This switch forces gen start-up/shut-down indicator to be binary, can be relaxed to improve time performance
-    flow_limits=True,
+    flow_limits=True, # This switch controls the enforcement of flow limits, handy for debugging.
 ):
     model = ConcreteModel()
     model.dual = Suffix(direction=Suffix.IMPORT_EXPORT)
