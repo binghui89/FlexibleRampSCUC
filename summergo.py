@@ -12,8 +12,11 @@ from IPython import embed as IP
 
 
 def return_unitont0state(instance, t=None):
-    # Find number of online/offline time intervals of thermal gens at the end of period t
-    # Copied from sequential_model.py
+    '''
+    Find number of online/offline time intervals of thermal gens at the end of period t
+    Copied from sequential_model.py
+    '''
+
     if not t:
         t = instance.TimePeriods.last()
     elif t not in instance.TimePeriods:
@@ -33,8 +36,11 @@ def return_unitont0state(instance, t=None):
     return dict_results
 
 def return_powergenerated_t(instance, t=None):
-    # Find power generation levels after period t
-    # Copied from sequential_model.py
+    '''
+    Find power generation levels after period t
+    Copied from sequential_model.py
+    '''
+
     if not t:
         t = instance.TimePeriods.last()
     elif t not in instance.TimePeriods:
@@ -737,6 +743,9 @@ def summergo_uced(casename):
     df_AGC_MOVE          = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
     df_ACE               = MyDataFrame(index=df_genfor_AGC.index, columns=['RAW', 'CPS2', 'SACE', 'ABS', 'INT'])
 
+    ls_rtuc = list()
+    ls_rted = list()
+
     # Start DAUC
     ############################################################################
     model = create_model(
@@ -942,11 +951,14 @@ def summergo_uced(casename):
             )
         )
         print(msg)
+        # IP()
+        ins_RTC.solutions.load_from(results_RTC)
+        ls_rtuc.append(ins_RTC)
 
-        dict_UnitOnT0State_RTC = return_unitont0state(ins_RTC, ins_RTC.TimePeriods.last())
-        dict_PowerGeneratedT0_RTC = return_powergenerated_t(ins_RTC, ins_RTC.TimePeriods.last())
+        # If there is no RTED run.
+        # dict_UnitOnT0State_RTC = return_unitont0state(ins_RTC, ins_RTC.TimePeriods.last())
+        # dict_PowerGeneratedT0_RTC = return_powergenerated_t(ins_RTC, ins_RTC.TimePeriods.last())
 
-'''
         dfs_RTC2RTD = return_downscaled_initial_condition(ins_RTC, nI_RTC, nI_RTD)
         df_UNITON_RTC2RTD       = dfs_RTC2RTD.df_uniton
         df_UNITSTUP_RTC2RTD     = dfs_RTC2RTD.df_unitstup
@@ -956,14 +968,14 @@ def summergo_uced(casename):
         df_SIGMAUP_RTC2RTD      = dfs_RTC2RTD.df_sigmaup
         df_SIGMADN_RTC2RTD      = dfs_RTC2RTD.df_sigmadn
 
-        ls_t_ed = df_timesequence.loc[df_timesequence['RTC']==t_s_RTC, 'RTD'].values
+        ls_t_ed = np.arange((i_rtuc-1)*12+1, i_rtuc*12 +1)
 
         # Convert RTC initial conditions into RTD initial conditions
         dict_UnitOnT0State_RTD = (pd.Series(dict_UnitOnT0State_RTC)*nI_RTDperRTC).to_dict()
         dict_PowerGeneratedT0_RTD = dict_PowerGeneratedT0_RTC
 
         for t_s_RTD in ls_t_ed:
-            t_e_RTD = t_s_RTD + 5 # Total 6 ED intervals, 1 binding interval, 5 look-ahead interval, 30 min in total
+            t_e_RTD = t_s_RTD  # Total 1 ED intervals in SUMMER-GO
 
             dict_uniton_all = MyDataFrame(
                 df_UNITON_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
@@ -1003,6 +1015,7 @@ def summergo_uced(casename):
                 dict_DispatchLimitsUpper=dict_DispacthLimitsUpper_all, # Only apply for committed units, keys should be the same as dict_UnitOn
                 dict_SigmaUp=dict_SigmaUp_all,
                 dict_SigmaDn=dict_SigmaDn_all,
+                flow_limits=False,
             )
             # msg = "RTED Model {} created!".format(t_s_RTD)
             # print msg
@@ -1048,9 +1061,6 @@ def summergo_uced(casename):
             )
             print msg
 
-            # End of the AGC loop
-            ####################################################################
-
             # Extract initial parameters from the binding interval for the next RTED run
             dict_UnitOnT0State_RTD = return_unitont0state(
                 ins_RTD, ins_RTD.TimePeriods.first()
@@ -1061,13 +1071,94 @@ def summergo_uced(casename):
             # IP()
             # dict_PowerGeneratedT0_RTD = df_AGC_SCHEDULE.loc[t_AGC, network.dict_set_gens['THERMAL']].to_dict()
 
+            ins_RTD.solutions.load_from(results_RTD)
+            ls_rted.append(ins_RTD)
+
 
         # IP()
         # Extract initial parameters from the binding interval of the last ED run for the next RTUC run
         # dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State_RTD)/nI_RTDperRTC).to_dict()
-        dict_UnitOnT0State_RTC = return_unitont0state(ins_RTC, ins_RTC.TimePeriods.first())
+        dict_UnitOnT0State_RTC = return_unitont0state(ins_RTC, ins_RTC.TimePeriods.last()) # Because in SUMMER-GO the first time interval of a RTUC run is the last time interval of the previous RTUC run.
         dict_PowerGeneratedT0_RTC = dict_PowerGeneratedT0_RTD
-'''
+    
+    # IP()
+    df_power_start = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_power_end   = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_uniton      = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_regup       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_regdn       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_spnup       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    sr_curtailment = pd.Series(0, index=df_genfor_RTD.index)
+
+    for i in range(len(ls_rted)):
+        ins_RTD = ls_rted[i]
+        t_s_RTD = i + 1
+        sr_curtailment.at[t_s_RTD] = value(ins_RTD.Curtailment[t_s_RTD])
+        for g in ins_RTD.AllGenerators:
+            df_power_end.at[t_s_RTD, g]   = value(ins_RTD.PowerGenerated[g, t_s_RTD])
+            df_power_start.at[t_s_RTD, g] = value(ins_RTD.PowerGeneratedT0[g])
+
+        for g in ins_RTD.ThermalGenerators:
+            df_uniton.at[t_s_RTD, g] = value(ins_RTD.UnitOn[g, t_s_RTD])
+            df_regup.at[t_s_RTD, g]  = value(ins_RTD.RegulatingReserveUpAvailable[g, t_s_RTD])
+            df_regdn.at[t_s_RTD, g]  = value(ins_RTD.RegulatingReserveDnAvailable[g, t_s_RTD])
+            df_spnup.at[t_s_RTD, g]  = value(ins_RTD.SpinningReserveUpAvailable[g, t_s_RTD])
+    df_power_mean = (df_power_start + df_power_end)/2
+
+    # Compare load and supply
+    ax1 = plt.subplot(1, 1, 1)
+    ax2 = ax1.twinx()
+    ax1.step(
+        df_power_mean.index,
+        df_power_mean.values.sum(axis=1),
+        where='post',
+        color='b',
+        label='Generation',
+    )
+    ax1.step(
+        df_busload_RTD.index,
+        df_busload_RTD.values.sum(axis=1),
+        where='post',
+        color='k',
+        label='Total load',
+    )
+    ax1.step(
+        sr_curtailment.index,
+        sr_curtailment,
+        color='g',
+        where='post',
+        label='Shedded load'
+    )
+    ax1.fill_between(
+        df_power_mean.index,
+        df_power_mean.values.sum(axis=1)-df_regdn.values.sum(axis=1),
+        df_power_mean.values.sum(axis=1),
+        color='b',
+        step='post',
+        alpha=0.2,
+    )
+    ax1.fill_between(
+        df_power_mean.index,
+        df_power_mean.values.sum(axis=1),
+        df_power_mean.values.sum(axis=1)+df_regup.values.sum(axis=1),
+        color='r',
+        step='post',
+        alpha=0.2,
+    )
+    ax1.set_ylabel('MW')
+    ax1.legend()
+    ax2.step(
+        df_uniton.index,
+        df_uniton.values.sum(axis=1),
+        where='post',
+        color='r',
+        label='Committed units'
+    )
+    ax2.set_ylabel('# of units')
+    ax2.legend()
+    plt.title('RTED results')
+    plt.show()
+
 if __name__ == '__main__':
     # test_dauc('118')
     summergo_uced('118')
