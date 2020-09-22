@@ -701,20 +701,25 @@ def summergo_uced(casename):
 
         dfs, network = build_texas_network()
 
-        csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
-        csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
-        csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
-        csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
-        csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
-        csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
-        csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
+        # csv_bus               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/bus.csv'
+        # csv_branch            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/branch.csv'
+        # csv_ptdf              = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ptdf.csv'
+        # csv_gen               = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator_data_plexos_withRT.csv'
+        # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
+        # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
+        # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
         csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
         csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
-        csv_busload_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_load.csv'
+        csv_busload_RTC       = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_load.csv'
         csv_genfor_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_generator.csv'
         csv_busload_RTD       = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_load.csv'
         csv_genfor_RTD        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_generator.csv'
 
+        # In the SUMMER-GO test case, we need to run 5-min RTUC runs so use ED data temporarily
+        csv_busload_RTC = csv_busload_RTD
+        csv_genfor_RTC  = csv_genfor_RTD
+
+        # Prepare day-ahead UC data
         df_busload = pd.read_csv(csv_busload, index_col=0)
         df_genfor  = pd.read_csv(csv_genfor, index_col=0)
         df_busload = MyDataFrame(df_busload.loc[:, df_busload.columns.difference(['LOAD'])])
@@ -722,6 +727,22 @@ def summergo_uced(casename):
         df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
         df_genfor_nonthermal = df_genfor.loc[:, network.dict_set_gens['NONTHERMAL']]
         df_genfor_nonthermal.fillna(0, inplace=True)
+
+        # Prepare real-time UC (hourly ahead) data
+        df_busload_RTC = pd.read_csv(csv_busload_RTC, index_col=['Slot'])
+        df_genfor_RTC  = pd.read_csv(csv_genfor_RTC, index_col=['Slot'])
+        df_busload_RTC = MyDataFrame(df_busload_RTC.loc[:, df_busload_RTC.columns.difference(['LOAD'])])
+        df_genfor_RTC  = MyDataFrame(df_genfor_RTC)
+        df_genfor_RTC  = df_genfor_RTC.loc[:, network.dict_set_gens['NONTHERMAL']]
+        df_genfor_RTC.fillna(0, inplace=True)
+
+        # Prepare economic dispatch data
+        df_busload_RTD = pd.read_csv(csv_busload_RTD, index_col=['Slot'])
+        df_genfor_RTD  = pd.read_csv(csv_genfor_RTD, index_col=['Slot'])
+        df_busload_RTD = MyDataFrame(df_busload_RTD.loc[:, df_busload_RTD.columns.difference(['LOAD'])])
+        df_genfor_RTD  = MyDataFrame(df_genfor_RTD)
+        df_genfor_RTD  = df_genfor_RTD.loc[:, network.dict_set_gens['NONTHERMAL']]
+        df_genfor_RTD.fillna(0, inplace=True)
 
         for g in network.dict_set_gens['ALL']:
             dict_PowerGeneratedT0[g] = dfs.df_gen.at[g, 'PMIN']
@@ -737,11 +758,11 @@ def summergo_uced(casename):
     df_SPNUP_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
 
     # AGC results
-    df_ACTUAL_GENERATION = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
-    df_AGC_SCHEDULE      = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
-    df_ACE_TARGET        = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
-    df_AGC_MOVE          = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
-    df_ACE               = MyDataFrame(index=df_genfor_AGC.index, columns=['RAW', 'CPS2', 'SACE', 'ABS', 'INT'])
+    # df_ACTUAL_GENERATION = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    # df_AGC_SCHEDULE      = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    # df_ACE_TARGET        = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    # df_AGC_MOVE          = MyDataFrame(index=df_genfor_AGC.index, columns=network.dict_set_gens['ALL'], dtype='float')
+    # df_ACE               = MyDataFrame(index=df_genfor_AGC.index, columns=['RAW', 'CPS2', 'SACE', 'ABS', 'INT'])
 
     ls_rtuc = list()
     ls_rted = list()
