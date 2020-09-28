@@ -66,13 +66,50 @@ class NewNetwork(object):
 
         self.dict_reserve_margin = dict()
 
+def startupinterval_rule(m, g):
+    '''
+    Return the number of intervals required to start a thermal unit up.
+    Note that if the number is greater than or equals to 1, then it is integer,
+    otherwise it can be a fractional number.
+    '''
+    Tsu = value(m.StartupHour[g]*m.nI) # m.StartupHour is in hour
+    if Tsu < 1:
+        print(g, 'is an instantaneous shut-down unit!')
+        return Tsu
+    else:
+        # Takes more than 1 interval to start-up, we'll use integer intervals, 
+        # and the parameters will be designed such that Tsu won't be fractional
+        return int(round(Tsu))
+
+def shutdowninterval_rule(m, g):
+    '''
+    Return the number of intervals required to shut a thermal unit down.
+    Note that if the number is greater than or equals to 1, then it is integer,
+    otherwise it can be a fractional number.
+    '''
+    Tsu = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
+    if Tsu < 1:
+        print(g, 'is an instantaneous shut-down unit!')
+        return Tsu
+    else:
+        # Takes more than 1 interval to start-up, we'll use integer intervals, 
+        # and the parameters will be designed such that Tsu won't be fractional
+        return int(round(Tsu))
+
+def thermalgeneratorsuncommitinstantaneous_rule(m):
+    set_gen = set()
+    for g in m.ThermalGenerators_uncommit:
+        if value(m.StartupInterval[g]) < 1:
+            set_gen.add(g)
+    return set_gen
+
 def sigma_up_rule(m, g, t):
     t1 = m.TimePeriods.first()
     te = m.TimePeriods.last()
     NT = value(m.NumTimePeriods)
-    Tsu = value(m.StartupHour[g]*m.nI) # m.StartupHour is in hour
+    Tsu = m.StartupInterval[g] # Intervals, m.StartupHour is in hour
     TU0 = value(m.UnitOnT0State[g])
-    if (g, t) in m.SigmaUp:
+    if (g, t) in m.SigmaUp: # Should be dict_SigmaUp?
         return m.SigmaUp[g, t]
     else:
         if (t >= t1 + (Tsu - 1)) and (NT >= Tsu):
@@ -97,7 +134,7 @@ def sigma_dn_rule(m, g, t):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
     NT  = value(m.NumTimePeriods)
-    Tsd = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
+    Tsd = m.ShutdownInterval[g] # Intervals, m.ShutdownHour is in hour
     if (g, t) in m.dict_SigmaDn:
         return m.dict_SigmaDn[g, t]
     else:
@@ -120,7 +157,7 @@ def sigma_power_times_up_rule(m, g, t):
     t1 = m.TimePeriods.first()
     te = m.TimePeriods.last()
     NT  = value(m.NumTimePeriods)
-    Tsu = value(m.StartupHour[g]*m.nI) # m.StartupHour is in hour
+    Tsu = m.StartupInterval[g] # Intervals, m.StartupHour is in hour
     TU0 = value(m.UnitOnT0State[g])
     Pmin = value(m.MinimumPowerOutput[g])
     if t >= t1 + (Tsu - 1) and (NT >= Tsu):
@@ -142,7 +179,7 @@ def sigma_power_times_dn_rule(m, g, t):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
     NT  = value(m.NumTimePeriods)
-    Tsd = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
+    Tsd = m.ShutdownInterval[g] # Intervals, m.ShutdownHour is in hour
     Pmin = value(m.MinimumPowerOutput[g])
     if t <= te - Tsd and (NT > Tsd):
         # float(Tsd-i+1)/Tsd*Pmin is the power level at the end of the ith 
@@ -163,7 +200,7 @@ def sigma_dn_initial_rule(m, g):
     t1  = m.TimePeriods.first()
     t0  = t1 - 1 # So t1 must be no less than 1
     NT  = value(m.NumTimePeriods)
-    i_end = min(value(m.ShutdownHour[g]*m.nI), NT) # m.ShutdownHour is in hour
+    i_end = min(m.ShutdownInterval[g], NT) # Intervals, m.ShutdownHour is in hour
     return sum(
         m.UnitShutDn[g, t0 + i]
         for i in range(1, i_end + 1)
@@ -173,7 +210,7 @@ def sigma_power_times_dn_initial_rule(m, g):
     t1  = m.TimePeriods.first()
     te  = m.TimePeriods.last()
     t0  = t1 - 1 # So t1 must be no less than 1
-    Tsd = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
+    Tsd = m.ShutdownInterval[g] # Intervals, m.ShutdownHour is in hour
     # For those super slow units, (t0 + Tsd - i + 1) may be greater than te, so 
     # this is to make sure all terms of sigma_power_times_dn_initial_rule fall 
     # in [t1, te]
@@ -186,8 +223,8 @@ def sigma_power_times_dn_initial_rule(m, g):
 
 def set_initial_shutdown_power_limits_rule(m):
     set_gen = set()
-    for g in m.ThermalGenerators_uncommit:
-        Tsd = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
+    for g in m.ThermalGenerators_uncommit_extend:
+        Tsd = m.ShutdownInterval[g] # Intervals, m.ShutdownHour is in hour
         if value(m.UnitOnT0State[g]) >= Tsd:
             set_gen.add(g)
     return set_gen
@@ -262,7 +299,9 @@ def production_equals_demand_rule(m, t):
     return p_average + m.Curtailment[t] - m.OverCommit[t] == m.Demand[t]
 
 #############################################
-# generation limit and ramping constraints
+# Generation limit and ramping constraints for 
+# thermal units with extended start-up/shut-down time (> 1 interval).
+# Maybe from Arroyo and Conejo (2004)
 #############################################
 
 def init_set_fix_shutdown(m):
@@ -279,8 +318,8 @@ def init_set_fix_shutdown(m):
         v0 = value(m.UnitOnT0[g])
         P0 = value(m.PowerGeneratedT0[g])
         Pmin = value(m.MinimumPowerOutput[g])
-        Tsu  = value(m.StartupHour[g]*m.nI) # m.StartupHour is in hour
-        Tsd  = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
+        Tsu  = m.StartupInterval[g] # Intervals, m.StartupHour is in hour
+        Tsd  = m.ShutdownInterval[g] # Intervals, m.ShutdownHour is in hour
         Tu0  = value(m.UnitOnT0State[g])
         if (v0==1) and (P0 < Pmin) and (Tu0 > Tsu):
             # Which shut-down interval am I in?
@@ -308,12 +347,12 @@ def thermal_gen_output_limits_shutdown_upper_rule(m, g, t):
     return m.MaximumPowerAvailable[g, t] <= (m.UnitOn[g, t] - m.SigmaDn[g, t])*m.MaximumPowerOutput[g] + m.SigmaPowerTimesDn[g, t] + m.Slack_shutdown_upper[g, t]
 
 def thermal_gen_output_limits_overlap_startup_rule(m, g, t):
-    Tsu  = value(m.StartupHour[g]*m.nI) # m.StartupHour is in hour
+    Tsu  = m.StartupInterval[g] # Intervals, m.StartupHour is in hour
     Pmin = value(m.MinimumPowerOutput[g])
     return m.MinimumPowerAvailable[g, t] + m.Slack_overlap_startup[g, t] >= (m.SigmaDn[g, t] + m.SigmaUp[g, t] - 1)*float(Tsu)/Tsu*Pmin
 
 def thermal_gen_output_limits_overlap_shutdown_rule(m, g, t):
-    Tsd = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
+    Tsd = m.ShutdownInterval[g] # Intervals, m.ShutdownHour is in hour
     Pmin = value(m.MinimumPowerOutput[g])
     return m.MinimumPowerAvailable[g, t] + m.Slack_overlap_shutdown[g, t] >= (m.SigmaDn[g, t] + m.SigmaUp[g, t] - 1)*float(Tsd-1+1)/Tsd*Pmin
 
@@ -328,7 +367,7 @@ def thermal_gen_rampup_rule(m, g, t):
 
 def thermal_gen_rampdn_rule(m, g, t):
     ramp_per_interval = m.RampDownLimitPerHour[g]/m.nI # m.RampDownLimitPerHour[g] is ramp rate per hour
-    Tsd = m.ShutdownHour[g]*m.nI # m.ShutdownHour is in hour
+    Tsd = m.ShutdownInterval[g] # Intervals, m.ShutdownHour is in hour
     if t is m.TimePeriods.first():
         power_last_period  = m.PowerGeneratedT0[g]
         uniton_last_period = m.UnitOnT0[g]
@@ -353,8 +392,8 @@ def thermal_gen_indicator_shutdown_rule(m, g, t):
 
 def thermal_gen_indicator_overlap_rule(m, g, t):
     te  = m.TimePeriods.last()
-    Tsu = value(m.StartupHour[g]*m.nI) # m.StartupHour is in hour
-    Tsd = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
+    Tsu = m.StartupInterval[g] # Intervals, m.StartupHour is in hour
+    Tsd = m.ShutdownInterval[g] # Intervals, m.ShutdownHour is in hour
     N = min(Tsu+Tsd, te - t + 2)
     return m.UnitStartUp[g, t] + sum(m.UnitShutDn[g, t+i-1] for i in range(1, N)) <= 1
     # if t + Tsu + Tsd - 2 <= m.TimePeriods.last():
@@ -366,10 +405,10 @@ def thermal_gen_indicator_shutdown_fixed_rule(m, g, t):
     # print 'shut-down fixed:', g, t
     return m.UnitShutDn[g, t] == 1
 
-def thermal_gen_output_max_available_rule(m, g, t):
+def all_gen_output_max_available_rule(m, g, t):
     return m.PowerGenerated[g,t] <= m.MaximumPowerAvailable[g, t]
 
-def thermal_gen_output_min_available_rule(m, g, t):
+def all_gen_output_min_available_rule(m, g, t):
     return m.MinimumPowerAvailable[g, t] <= m.PowerGenerated[g,t]
 
 # Maximum available power of non-thermal units less than forecast
@@ -385,6 +424,101 @@ def enforce_generator_block_output_rule(m, g, t):
 
 def enforce_generator_block_output_limit_rule(m, g, k, t):
     return m.BlockPowerGenerated[g,k,t] <= m.BlockSize[g,k]
+
+#############################################
+# Generation limits and ramping constraints for 
+# thermal units with instant start-up/shut-down time (< 1 interval).
+# From Carrion and Arroyo (2006)
+#############################################
+
+def thermal_gen_instant_pmin_rule(m, g, t):
+    return m.MinimumPowerOutput[g]*m.UnitOn[g, t] <= m.MinimumPowerAvailable[g, t]
+
+def thermal_gen_instant_pmax_rule(m, g, t):
+    return m.MaximumPowerAvailable[g, t] <= m.MaximumPowerOutput[g]*m.UnitOn[g, t]
+
+def thermal_gen_instant_pmax_ramp_up_rule(m, g, t):
+    '''
+    Constraint 18 in Carrion and Arroyo (2006).
+    4 cases, split by (t-1, t) unit status (RHS is defined as the delta from 
+    m.PowerGenerated[g, t-1])
+    (0, 0) - unit staying off:   RHS = maximum generator output (degenerate 
+                                       upper bound due to unit being off) 
+    (0, 1) - unit switching on:  RHS = startup ramp limit 
+    (1, 0) - unit switching off: RHS = standard ramp limit minus startup ramp 
+                                       limit plus maximum power generated (
+                                       degenerate upper bound due to unit off)
+    (1, 1) - unit staying on:    RHS = standard ramp limit
+    '''
+    rampup_per_interval = m.RampUpLimitPerHour[g]/m.nI # m.RampUpLimitPerHour[g] is ramp rate per hour
+    rampup_per_startup  = m.MinimumPowerOutput[g] + rampup_per_interval*(1 - m.StartupInterval[g]) # Maximum ramp up during an interval from offline
+    if t == m.TimePeriods.first():
+        return m.MaximumPowerAvailable[g, t] <= (
+            m.PowerGeneratedT0[g] 
+            + rampup_per_interval * m.UnitOnT0[g] 
+            + rampup_per_startup * (m.UnitOn[g, t] - m.UnitOnT0[g]) 
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
+        )
+    else:
+        t_prev = m.TimePeriods.prev(t)
+        return m.MaximumPowerAvailable[g, t] <= (
+            m.PowerGenerated[g, t_prev] 
+            + rampup_per_interval * m.UnitOn[g, t_prev] 
+            + rampup_per_startup * (m.UnitOn[g, t] - m.UnitOn[g, t_prev])
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t])
+        )
+
+def thermal_gen_instant_pmax_ramp_down_rule(m, g, t):
+    '''
+    Constraint 19 defined in Carrion and Arroyo (2006).
+    4 cases, split by (t, t+1) unit status
+    (0, 0) - unit staying off:   RHS = 0 (degenerate upper bound)
+    (0, 1) - unit switching on:  RHS = maximum generator output minus shutdown 
+                                       ramp limit (degenerate upper bound) 
+                                       - this is the strangest case.
+    (1, 0) - unit switching off: RHS = shutdown ramp limit
+    (1, 1) - unit staying on:    RHS = maximum generator output (degenerate 
+                                       upper bound)
+    '''
+    rampdown_per_interval = m.RampDownLimitPerHour[g]/m.nI # m.RampDownLimitPerHour[g] is ramp rate per hour
+    rampdown_per_shutdown  = m.MinimumPowerOutput[g] + rampdown_per_interval*(1 - m.ShutdownInterval[g]) # Maximum ramp down during an interval to offline
+    if t == m.TimePeriods.first():
+        return Constraint.Skip
+    else:
+        t_prev = m.TimePeriods.prev(t)
+        return m.MaximumPowerAvailable[g, t_prev] <= (
+            m.MaximumPowerOutput[g] * m.UnitOn[g, t] 
+            + rampdown_per_shutdown * (m.UnitOn[g, t_prev] - m.UnitOn[g, t])
+        )
+
+def thermal_gen_instant_ramp_down_rule(m, g, t):
+    '''
+    Constraint 20 defined in Carrion and Arroyo (2006).
+    4 cases, split by (t-1, t) unit status: 
+    (0, 0) - unit staying off:   RHS = maximum generator output (degenerate 
+                                 upper bound)
+    (0, 1) - unit switching on:  RHS = standard ramp-down limit minus 
+                                       shutdown ramp limit plus maximum 
+                                       generator output - this is the 
+                                       strangest case.
+    (1, 0) - unit switching off: RHS = shutdown ramp limit 
+    (1, 1) - unit staying on:    RHS = standard ramp-down limit
+    '''
+    rampdown_per_interval = m.RampDownLimitPerHour[g]/m.nI # m.RampDownLimitPerHour[g] is ramp rate per hour
+    rampdown_per_shutdown  = m.MinimumPowerOutput[g] + rampdown_per_interval*(1 - m.ShutdownInterval[g]) # Maximum ramp down during an interval to offline
+    if t == m.TimePeriods.first():
+        return m.PowerGeneratedT0[g] - m.PowerGenerated[g, t] <= (
+            rampdown_per_interval * m.UnitOn[g, t] 
+            + rampdown_per_shutdown * (m.UnitOnT0[g] - m.UnitOn[g, t]) 
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOnT0[g])
+        )
+    else:
+        t_prev = m.TimePeriods.prev(t)
+        return m.PowerGenerated[g, t_prev] - m.PowerGenerated[g, t] <= (
+            rampdown_per_interval * m.UnitOn[g, t] 
+            + rampdown_per_shutdown * (m.UnitOn[g, t_prev] - m.UnitOn[g, t]) 
+            + m.MaximumPowerOutput[g] * (1 - m.UnitOn[g, t_prev])
+        )
 
 #############################################
 # Constraints for line capacity limits
@@ -735,7 +869,7 @@ def create_model(
     model.ThermalGenerators_commit = Set(
         within=model.ThermalGenerators,
         initialize=set(unzipped_keys[0]) if dict_UnitOn else set(),
-    )
+    ) # Commited units, we only have dispatch limits for them, no unit commitment constraints
     model.ThermalGenerators_uncommit = model.ThermalGenerators - model.ThermalGenerators_commit
 
     # Set of Generator Blocks Set.
@@ -848,7 +982,7 @@ def create_model(
         initialize=network.dict_rampdn_by_gen,
     )
 
-    # Start-up and shut-down time in hours for thermal gens
+    # Start-up and shut-down time in hours and intervals for thermal gens
     model.StartupHour = Param(
         model.ThermalGenerators,
         within=NonNegativeReals,
@@ -859,6 +993,27 @@ def create_model(
         within=NonNegativeReals,
         initialize=network.dict_h_shutdn_by_gen,
     )
+    model.StartupInterval = Param(
+        model.ThermalGenerators,
+        within=NonNegativeReals,
+        initialize=startupinterval_rule,
+    )
+    model.ShutdownInterval = Param(
+        model.ThermalGenerators,
+        within=NonNegativeReals,
+        initialize=shutdowninterval_rule,
+    )
+
+    # After defining the numbers of intervals it take to start up/shut down, we 
+    # can define the set of instantaneous thermal units (start-up/shut-down 
+    # time < 1 interval)
+    model.ThermalGenerators_uncommit_instant = Set(
+        within=model.ThermalGenerators_uncommit,
+        initialize=thermalgeneratorsuncommitinstantaneous_rule,
+    )
+    model.ThermalGenerators_uncommit_extend = model.ThermalGenerators_uncommit - model.ThermalGenerators_uncommit_instant
+
+    # IP()
 
     # Min number of time periods that a gen must be on-line (off-line) once brought up (down).
     # model.MinimumUpHour = Param(
@@ -1126,27 +1281,27 @@ def create_model(
     model.dict_SigmaUp = dict_SigmaUp if dict_SigmaUp else dict()
     model.dict_SigmaDn = dict_SigmaDn if dict_SigmaDn else dict()
     model.SigmaUp = Expression(
-        model.ThermalGenerators,
+        model.ThermalGenerators - model.ThermalGenerators_uncommit_instant,#
         model.TimePeriods,
         rule=sigma_up_rule,
     )
     model.SigmaDn = Expression(
-        model.ThermalGenerators,
+        model.ThermalGenerators - model.ThermalGenerators_uncommit_instant,#
         model.TimePeriods,
         rule=sigma_dn_rule,
     )
     model.SigmaPowerTimesUp = Expression(
-        model.ThermalGenerators,
+        model.ThermalGenerators - model.ThermalGenerators_uncommit_instant,#
         model.TimePeriods,
         rule=sigma_power_times_up_rule,
     )
     model.SigmaPowerTimesDn = Expression(
-        model.ThermalGenerators,
+        model.ThermalGenerators - model.ThermalGenerators_uncommit_instant,#
         model.TimePeriods,
         rule=sigma_power_times_dn_rule,
     )
 
-    model.set_initial_shutdown_power_limits = Set(
+    model.set_initial_shutdown_power_limits = Set(#
         within=model.ThermalGenerators,
         initialize=set_initial_shutdown_power_limits_rule,
     )
@@ -1179,12 +1334,12 @@ def create_model(
     model.thermal_gen_output_max_available = Constraint(
         model.AllGenerators,
         model.TimePeriods, 
-        rule=thermal_gen_output_max_available_rule,
+        rule=all_gen_output_max_available_rule,
     )
     model.thermal_gen_output_min_available = Constraint(
         model.AllGenerators,
         model.TimePeriods, 
-        rule=thermal_gen_output_min_available_rule,
+        rule=all_gen_output_min_available_rule,
     )
     model.EnforceRenewableOutputLimits = Constraint(
         model.NonThermalGenerators,
@@ -1193,7 +1348,7 @@ def create_model(
     )
 
     ############################################
-    # Thermal generation start-up/shut-down.
+    # Thermal generation (extended) start-up/shut-down.
     ############################################
 
     model.thermal_gen_output_limits_shutdown_upper_initial = Constraint(
@@ -1207,75 +1362,75 @@ def create_model(
     )
 
     model.thermal_gen_output_limits_startup_lower = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_output_limits_startup_lower_rule,
     )
 
     model.thermal_gen_output_limits_startup_upper = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_output_limits_startup_upper_rule,
     )
 
     model.thermal_gen_output_limits_shutdown_lower = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_output_limits_shutdown_lower_rule,
     )
 
     model.thermal_gen_output_limits_shutdown_upper = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_output_limits_shutdown_upper_rule,
     )
 
     model.thermal_gen_output_limits_overlap_startup = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_output_limits_overlap_startup_rule,
     )
 
     model.thermal_gen_output_limits_overlap_shutdown = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_output_limits_overlap_shutdown_rule,
     )
 
     # Ramp rate constraints
     model.thermal_gen_rampup = Constraint(
-        model.ThermalGenerators,
+        model.ThermalGenerators - model.ThermalGenerators_uncommit_instant,
         model.TimePeriods,
         rule=thermal_gen_rampup_rule,
     )
 
     model.thermal_gen_rampdn = Constraint(
-        model.ThermalGenerators,
+        model.ThermalGenerators - model.ThermalGenerators_uncommit_instant,
         model.TimePeriods,
         rule=thermal_gen_rampdn_rule,
     )
 
     model.thermal_gen_startup_shutdown = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_startup_shutdown_rule,
     )
 
     # Indicator constraints
     model.thermal_gen_indicator_startup = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_indicator_startup_rule,
     )
 
     model.thermal_gen_indicator_shutdown = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_indicator_shutdown_rule,
     )
 
     model.thermal_gen_indicator_overlap = Constraint(
-        model.ThermalGenerators_uncommit,
+        model.ThermalGenerators_uncommit_extend,
         model.TimePeriods,
         rule=thermal_gen_indicator_overlap_rule,
     )
@@ -1287,6 +1442,39 @@ def create_model(
     #     model.set_fix_shutdown,
     #     rule=thermal_gen_indicator_shutdown_fixed_rule,
     # )
+
+    ############################################
+    # Thermal generation (instant) start-up/shut-down.
+    ############################################
+    model.thermal_gen_instant_pmin_rule = Constraint(
+        model.ThermalGenerators_uncommit_instant,
+        model.TimePeriods,
+        rule=thermal_gen_instant_pmin_rule,
+    )
+
+    model.thermal_gen_instant_pmax = Constraint(
+        model.ThermalGenerators_uncommit_instant,
+        model.TimePeriods,
+        rule=thermal_gen_instant_pmax_rule,
+    )
+    
+    model.thermal_gen_instant_pmax_ramp_up = Constraint(
+        model.ThermalGenerators_uncommit_instant,
+        model.TimePeriods,
+        rule=thermal_gen_instant_pmax_ramp_up_rule,
+    )
+
+    model.thermal_gen_instant_pmax_ramp_down = Constraint(
+        model.ThermalGenerators_uncommit_instant,
+        model.TimePeriods,
+        rule=thermal_gen_instant_pmax_ramp_down_rule,
+    )
+
+    model.thermal_gen_instant_ramp_down = Constraint(
+        model.ThermalGenerators_uncommit_instant,
+        model.TimePeriods,
+        rule=thermal_gen_instant_ramp_down_rule,
+    )
 
     ############################################
     # generation block outputs constraints #
@@ -1484,6 +1672,17 @@ def build_118_network():
         df_gen.at['Geo 01', 'SHUTDOWN'] = 50
         # df_margcost.at['Geo 01', 'nlcost'] = 10
         # df_margcost.at['Geo 01', '1']      = 10
+
+    # This is for the SUMMER-GO study, CT units can start-up in 30 min if PMAX 
+    # is greater than 50 MW (here topped at 100), and 15 min if less than 50 MW
+    # See Gonzalez-Salazar et al. "Review of the operational flexibility and 
+    # emissions of gas-and coal-fired power plants in a future with growing 
+    # renewables." Renewable and Sustainable Energy Reviews 82 (2018): 1497-1513
+    # Aero-derivative < 50 MW, Heavy-duty > 50 MW
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_UP_TIME'] = 0.5
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<50), 'MINIMUM_UP_TIME'] = 0.25
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_DOWN_TIME'] = 0.5
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<50), 'MINIMUM_DOWN_TIME'] = 0.25
 
     # Add start-up and shut-down time in a quick and dirty way
     df_gen.loc[:, 'STARTUP_TIME']  = df_gen.loc[:, 'MINIMUM_UP_TIME']
@@ -1861,7 +2060,7 @@ def test_dauc(casename, showing_gens='problematic'):
         nI=1,
         dict_UnitOnT0State=dict_UnitOnT0State,
         dict_PowerGeneratedT0=dict_PowerGeneratedT0,
-        # flow_limits=False,
+        flow_limits=False,
     )
     msg = 'Model created at: {:>.2f} s'.format(time() - t0)
     print(msg)
@@ -1928,7 +2127,8 @@ def test_dauc(casename, showing_gens='problematic'):
             attr = getattr(instance, a)
             dict_row = {'Gen': g, 'Var': a}
             for t in instance.TimePeriods:
-                dict_row[t] = value(attr[g, t])
+                if (g, t) in attr:
+                    dict_row[t] = value(attr[g, t])
             ls_dict_therm.append(dict_row)
     df_therm = pd.DataFrame(ls_dict_therm, columns=['Gen', 'Var']+list(instance.TimePeriods.value))
 
