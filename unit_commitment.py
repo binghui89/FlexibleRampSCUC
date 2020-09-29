@@ -74,7 +74,7 @@ def startupinterval_rule(m, g):
     '''
     Tsu = value(m.StartupHour[g]*m.nI) # m.StartupHour is in hour
     if Tsu < 1:
-        print(g, 'is an instantaneous shut-down unit!')
+        # print(g, 'is an instantaneous shut-down unit!')
         return Tsu
     else:
         # Takes more than 1 interval to start-up, we'll use integer intervals, 
@@ -89,7 +89,7 @@ def shutdowninterval_rule(m, g):
     '''
     Tsu = value(m.ShutdownHour[g]*m.nI) # m.ShutdownHour is in hour
     if Tsu < 1:
-        print(g, 'is an instantaneous shut-down unit!')
+        # print(g, 'is an instantaneous shut-down unit!')
         return Tsu
     else:
         # Takes more than 1 interval to start-up, we'll use integer intervals, 
