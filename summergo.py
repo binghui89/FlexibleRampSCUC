@@ -54,7 +54,9 @@ def return_powergenerated_t(instance, t=None):
 
 def return_downscaled_initial_condition(instance, nI_L, nI_S):
     '''
-    Calculate upper and lower dispatch limits based on the given solved Pyomo instance.
+    Calculate upper and lower dispatch limits based on the given solved Pyomo 
+    instance. Note that only those generators whose start-up/shut-down time is 
+    greater than 1 interval will be included.
     '''
 
     nI_SperL = nI_S/nI_L # Number of short (S) intervals per long (L) interval, must be integer
@@ -68,7 +70,8 @@ def return_downscaled_initial_condition(instance, nI_L, nI_S):
     )
     t0_L = tindex_L[0] - 1
     t0_S = tindex_S[0] - 1
-    ls_gen_therm = list(instance.ThermalGenerators.value)
+    # ls_gen_therm = list(instance.ThermalGenerators.value)
+    ls_gen_therm = list(instance.ThermalGenerators.value - instance.ThermalGenerators_uncommit_instant.value)
     nG_therm = len(ls_gen_therm)
 
     # Results container
@@ -320,6 +323,18 @@ def build_118_network():
         df_gen.at['Geo 01', 'SHUTDOWN'] = 50
         # df_margcost.at['Geo 01', 'nlcost'] = 10
         # df_margcost.at['Geo 01', '1']      = 10
+
+    # This is for the SUMMER-GO study, CT units can start-up in 30 min if PMAX 	
+    # is greater than 50 MW (here topped at 100), and 15 min if less than 50 MW	
+    # See Gonzalez-Salazar et al. "Review of the operational flexibility and 	
+    # emissions of gas-and coal-fired power plants in a future with growing 	
+    # renewables." Renewable and Sustainable Energy Reviews 82 (2018): 1497-1513	
+    # Aero-derivative < 50 MW, Heavy-duty > 50 MW	
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_UP_TIME'] = 0.5	
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<50), 'MINIMUM_UP_TIME'] = 0.25	
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_DOWN_TIME'] = 0.5	
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<50), 'MINIMUM_DOWN_TIME'] = 0.25	
+
 
     # Add start-up and shut-down time in a quick and dirty way
     df_gen.loc[:, 'STARTUP_TIME']  = df_gen.loc[:, 'MINIMUM_UP_TIME']
@@ -794,7 +809,6 @@ def summergo_uced(casename):
     print(msg)
     content += msg
     content += '\n'
-    # IP()
 
     # For debugging purpose only, normally, all slack variables should be 0
     print 'Non-zero slack variables:'
@@ -884,7 +898,6 @@ def summergo_uced(casename):
     dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State)*nI_RTCperDAC).to_dict()
     dict_PowerGeneratedT0_RTC = dict_PowerGeneratedT0
 
-    # IP()
     for i_rtuc in np.arange(1, 25):
         t_s_RTC = (i_rtuc-1)*12+1 # 4*(i_rtuc-1) + 1
         t_e_RTC = i_rtuc*12 # 4*i_rtuc
@@ -972,7 +985,7 @@ def summergo_uced(casename):
             )
         )
         print(msg)
-        # IP()
+
         ins_RTC.solutions.load_from(results_RTC)
         ls_rtuc.append(ins_RTC)
 
