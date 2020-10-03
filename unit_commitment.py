@@ -275,7 +275,6 @@ def _reserve_requirement_rule(m, t):
 def _regulating_requirement_rule(m, t):
     return m.RegulatingReserveFactor*sum(value(m.BusDemand[b,t]) for b in m.LoadBuses)
 
-
 #############################################
 # supply-demand constraints
 #############################################
@@ -659,51 +658,80 @@ def enforce_down_time_constraints_subsequent(m, g, t):
 # Regulating and spinning availability
 #############################################
 
-def reserve_up_by_maximum_available_power_thermal_rule(m, g, t):
+# Reg-up reserve by available power
+def regup_by_available_power_thermal_rule(m, g, t):
     return (
         m.PowerGenerated[g, t]
         + m.RegulatingReserveUpAvailable[g, t]
-        + m.SpinningReserveUpAvailable[g, t]
         - m.MaximumPowerAvailable[g, t]
     ) <= 0
 
-def reserve_dn_by_maximum_available_power_thermal_rule(m, g, t):
-    # return (
-    #     m.PowerGenerated[g, t]
-    #     - m.RegulatingReserveDnAvailable[g, t]
-    #     - m.MinimumPowerOutput[g] * m.UnitOn[g, t]
-    # ) >= 0
+# Reg-dn reserve by available power
+def regdn_by_available_power_thermal_rule(m, g, t):
     return (
         m.PowerGenerated[g, t] 
         - m.RegulatingReserveDnAvailable[g, t] 
         - m.MinimumPowerAvailable[g, t]
     ) >= 0
 
-def reserve_up_by_ramp_thermal_rule(m, g, t):
-    # Note ERCOT regulates that reserves must be able to ramp to awarded level
-    # within 10 minutes.
+# Spinning reserve by available power
+def spn_by_available_power_thermal_rule(m, g, t):
+    if m.IntervalHour >= 10/60:
+        return (
+            m.PowerGenerated[g, t] 
+            + m.RegulatingReserveUpAvailable[g, t] 
+            + m.SpinningReserveUpAvailable[g, t] 
+            - m.MaximumPowerAvailable[g, t]
+        ) <= 0
+    else:
+        return Constraint.skip
+
+# Reg-up reserve by ramp rates
+def regup_by_ramp_thermal_rule(m, g, t):
+    # Note ERCOT requires that reg-up must be able to ramp to awarded level
+    # within 5 minutes.
     return (
         m.RegulatingReserveUpAvailable[g, t]
-        + m.SpinningReserveUpAvailable[g, t]
-        - 10/60 * m.RampUpLimitPerHour[g] * m.UnitOn[g, t]
+        - 5.0/60.0 * m.RampUpLimitPerHour[g] * m.UnitOn[g, t]
     ) <= 0
 
-def reserve_dn_by_ramp_thermal_rule(m, g, t):
-    # Note ERCOT regulates that reserves must be able to ramp to awarded level
-    # within 10 minutes.
+# Reg-dn reserve by ramp rates
+def regdn_by_ramp_thermal_rule(m, g, t):
+    # Note ERCOT requires that reg-dn must be able to ramp to awarded level
+    # within 5 minutes.
     return (
         m.RegulatingReserveDnAvailable[g, t]
+        - 5.0/60.0 * m.RampDownLimitPerHour[g] * m.UnitOn[g, t]
+    ) <= 0    
+
+# Spin-up reserve by ramp rates
+def spn_by_ramp_thermal_rule(m, g, t):
+    # Note ERCOT requires that spinning reserves must be able to ramp to awarded 
+    # level within 10 minutes.
+    return (
+        m.SpinningReserveUpAvailable[g, t]
         - 10/60 * m.RampDownLimitPerHour[g] * m.UnitOn[g, t]
     ) <= 0    
 
-# model.reserve_up_by_ramp_thermal_constraint = Constraint(
-#     model.ThermalGenerators, model.TimePeriods,
-#     rule=reserve_up_by_ramp_thermal_rule
-# )
-# model.reserve_dn_by_ramp_thermal_constraint = Constraint(
-#     model.ThermalGenerators, model.TimePeriods,
-#     rule=reserve_dn_by_ramp_thermal_rule
-# )
+# Non-spin reserve availability
+def nsr_by_available_power_thermal_rule(m, g, t):
+    if m.StartupHour[g] <= 0.5:
+        nsr = m.MinimumPowerOutput[g] + m.RampUpLimitPerHour[g]*(0.5-m.StartupHour[g])
+    else:
+        nsr = 0
+    return m.NonSpinningReserveAvailable[g, t] <= (1 - m.UnitOn[g, t] - m.UnitShutDn[g, t])*nsr
+
+# Regulating up reserve requirements
+def enforce_regulating_up_reserve_requirement_rule(m, t):
+     return sum(
+         m.RegulatingReserveUpAvailable[g,t] for g in m.ThermalGenerators
+     ) + m.RegulatingReserveUpShortage[t] - m.RegulatingReserveRequirement[t] == 0
+
+# Regulating down reserve requirements
+def enforce_regulating_down_reserve_requirement_rule(m, t):
+    return sum(
+        m.RegulatingReserveDnAvailable[g,t] for g in m.ThermalGenerators
+    ) + m.RegulatingReserveDnShortage[t] - m.RegulatingReserveRequirement[t] == 0
 
 # Spinning reserve requirements
 def enforce_spinning_reserve_requirement_rule(m,  t):
@@ -711,17 +739,11 @@ def enforce_spinning_reserve_requirement_rule(m,  t):
         m.SpinningReserveUpAvailable[g,t] for g in m.ThermalGenerators
     ) + m.SpinningReserveUpShortage[t] - m.SpinningReserveRequirement[t] == 0
 
-# Regulating reserve requirements
-def enforce_regulating_up_reserve_requirement_rule(m, t):
-     return sum(
-         m.RegulatingReserveUpAvailable[g,t] for g in m.ThermalGenerators
-     ) + m.RegulatingReserveUpShortage[t] - m.RegulatingReserveRequirement[t] == 0
- 
-def enforce_regulating_down_reserve_requirement_rule(m, t):
+# Nonspinning reserve requirements
+def enforce_nonspinning_reserve_requirement_rule(m, t):
     return sum(
-        m.RegulatingReserveDnAvailable[g,t] for g in m.ThermalGenerators
-    ) + m.RegulatingReserveDnShortage[t] - m.RegulatingReserveRequirement[t] == 0
-
+        m.NonSpinningReserveAvailable[g,t] for g in m.ThermalGenerators
+    ) + m.NonSpinningReserveShortage[t] - m.NonSpinningReserveRequirement[t] == 0
 
 #############################################
 # constraints for computing cost components #
@@ -783,6 +805,7 @@ def compute_total_reserve_shortage_cost_rule(m):
         m.SpinningReserveUpShortage[t] * 2000
         + m.RegulatingReserveUpShortage[t] * 5500
         + m.RegulatingReserveDnShortage[t] * 5500
+        + m.NonSpinningReserveShortage[t] * 2000 # Let's use shortage cost of spinning reserve
         for t in m.TimePeriods
     )*m.IntervalHour
 
@@ -824,8 +847,6 @@ def create_model(
     network,
     df_busload, # Only bus load, first dimension time starts from 1, no total load
     df_genfor_nonthermal, # Only generation from nonthermal gens, first dim time starts from 1
-    # ReserveFactor,
-    # RegulatingReserveFactor,
     nI, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
     dict_UnitOnT0State=None, # How many time periods the units have been on at T0 from last RTUC model
     dict_PowerGeneratedT0=None, # Initial power generation level at T0 from last RTUC model
@@ -1114,6 +1135,13 @@ def create_model(
         mutable=True,
         initialize=_regulating_requirement_rule
     )
+    model.NonSpinningReserveRequirement = Param(
+        model.TimePeriods,
+        within=NonNegativeReals, 
+        default=0.0, 
+        mutable=True,
+        initialize=network.dict_reserve_margin['NSR'],
+    )
 
 
     """VARIABLES"""
@@ -1139,6 +1167,12 @@ def create_model(
         within=NonNegativeReals, 
         initialize=0.0
     )
+    model.NonSpinningReserveAvailable = Var(
+        model.ThermalGenerators, 
+        model.TimePeriods, 
+        within=NonNegativeReals, 
+        initialize=0.0,
+    )
 
     # Reserve shortages
     model.RegulatingReserveUpShortage = Var(
@@ -1155,6 +1189,11 @@ def create_model(
         model.TimePeriods, 
         within=NonNegativeReals, 
         initialize=0.0
+    )
+    model.NonSpinningReserveShortage = Var(
+        model.TimePeriods, 
+        within=NonNegativeReals, 
+        initialize=0.0,
     )
 
     # Generator related variables
@@ -1538,41 +1577,54 @@ def create_model(
     # Available reseves from thermal generators #
     #############################################
 
-    model.reserve_up_by_maximum_available_power_thermal_constraint = Constraint(
+    model.regup_by_available_power_thermal_constraint = Constraint(
         model.ThermalGenerators, 
         model.TimePeriods,
-        rule=reserve_up_by_maximum_available_power_thermal_rule
+        rule=regup_by_available_power_thermal_rule,
     )
-    model.reserve_dn_by_maximum_available_power_thermal_constraint = Constraint(
+    model.regdn_by_available_power_thermal_constraint = Constraint(
         model.ThermalGenerators, 
         model.TimePeriods,
-        rule=reserve_dn_by_maximum_available_power_thermal_rule
+        rule=regdn_by_available_power_thermal_rule,
     )
 
-    # model.reserve_up_by_ramp_thermal_constraint = Constraint(
-    #     model.ThermalGenerators, model.TimePeriods,
-    #     rule=reserve_up_by_ramp_thermal_rule
-    # )
-    # model.reserve_dn_by_ramp_thermal_constraint = Constraint(
-    #     model.ThermalGenerators, model.TimePeriods,
-    #     rule=reserve_dn_by_ramp_thermal_rule
-    # )
+    model.regup_by_ramp_thermal_constraint = Constraint(
+        model.ThermalGenerators, 
+        model.TimePeriods,
+        rule=regup_by_ramp_thermal_rule,
+    )
+    model.regdn_by_ramp_thermal_constraint = Constraint(
+        model.ThermalGenerators, 
+        model.TimePeriods,
+        rule=regdn_by_ramp_thermal_rule,
+    )
+
+    model.nsr_by_available_power_thermal_constraint = Constraint(
+        model.ThermalGenerators, 
+        model.TimePeriods,
+        rule=nsr_by_available_power_thermal_rule,
+    )
 
     #############################################
     # Reserve requirements constraints #
     #############################################
-    model.EnforceSpinningReserveUp = Constraint(
-        model.TimePeriods, 
-        rule=enforce_spinning_reserve_requirement_rule
-    )
+    # model.enforce_spinning_reserve_requirement_constraint = Constraint(
+    #     model.TimePeriods, 
+    #     rule=enforce_spinning_reserve_requirement_rule
+    # )
 
-    model.EnforceRegulatingUpReserveRequirements = Constraint(
+    model.enforce_regulating_up_reserve_requirement_constraint = Constraint(
         model.TimePeriods, 
         rule=enforce_regulating_up_reserve_requirement_rule
     )
-    model.EnforceRegulatingDnReserveRequirements = Constraint(
+    model.enforce_regulating_down_reserve_requirement_constraint = Constraint(
         model.TimePeriods, 
         rule=enforce_regulating_down_reserve_requirement_rule
+    )
+
+    model.enforce_nonspinning_reserve_requirement_constraint = Constraint(
+        model.TimePeriods,
+        rule = enforce_nonspinning_reserve_requirement_rule,
     )
 
     #############################################
@@ -1744,6 +1796,7 @@ def build_118_network():
     network_118.dict_reserve_margin['REGUP'] = 0.05
     network_118.dict_reserve_margin['REGDN'] = 0.05
     network_118.dict_reserve_margin['SPNUP'] = 0.1
+    network_118.dict_reserve_margin['NSR'] = df_gen['PMAX'].max() # The largest gen
 
     dfs = GroupDataFrame()
     dfs.df_bus              = df_bus
