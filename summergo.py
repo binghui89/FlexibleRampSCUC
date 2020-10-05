@@ -8,6 +8,7 @@ from email.mime.text import MIMEText
 from numpy import sign
 from matplotlib import pyplot as plt
 from unit_commitment import GroupDataFrame, MyDataFrame, NewNetwork, create_model
+from copy import deepcopy
 from IPython import embed as IP
 
 
@@ -158,9 +159,9 @@ def return_downscaled_initial_condition(instance, nI_L, nI_S):
     df_UNITSTUP_L2S.loc[(tindex_L-1)*nI_SperL+1,:] = df_UNITSTUP_L.values # ar_UNITSTUP_L2S[(tindex_L-1)*nI_SperL, :] = df_UNITSTUP_L.values
     df_UNITSTDN_L2S.loc[tindex_L*nI_SperL, :] = df_UNITSTDN_L.values # ar_UNITSTDN_L2S[tindex_L*nI_SperL-1, :]   = df_UNITSTDN_L.values
 
-    ar_UNITON_L2S = (df_UNITON_L+df_UNITSTDN_L).values.astype(int).repeat(nI_SperL, axis=0) - df_UNITSTDN_L2S.values.astype(int) # ar_UNITON_L2S = (df_UNITON_L+df_UNITSTDN_L).values.astype(int).repeat(nI_SperL, axis=0) - ar_UNITSTDN_L2S
+    ar_UNITON_L2S = (df_UNITON_L+df_UNITSTDN_L).round(0).values.astype(int).repeat(nI_SperL, axis=0) - df_UNITSTDN_L2S.round(0).values.astype(int) # ar_UNITON_L2S = (df_UNITON_L+df_UNITSTDN_L).values.astype(int).repeat(nI_SperL, axis=0) - ar_UNITSTDN_L2S
 
-    ar_SIGMAUP_L2S = df_SIGMAUP_L.astype(int).values.repeat(nI_SperL, axis=0)
+    ar_SIGMAUP_L2S = df_SIGMAUP_L.round(0).astype(int).values.repeat(nI_SperL, axis=0)
     ar_SIGMADN_L2S = np.concatenate(
         [df_SIGMADNT0_L.values, df_SIGMADN_L.values], 
         axis=0
@@ -310,7 +311,7 @@ def build_118_network():
     df_blockmargcost    = pd.read_csv(csv_blockmarginalcost, index_col=0)
     df_blockoutputlimit = pd.read_csv(csv_blockoutputlimit,  index_col=0)
 
-    df_bus['VOLL'] = 9000
+    df_bus['VOLL'] = 9000*2
     baseMVA = 100
 
     # This is to fix a bug in the 118 bus system
@@ -330,11 +331,13 @@ def build_118_network():
     # emissions of gas-and coal-fired power plants in a future with growing 	
     # renewables." Renewable and Sustainable Energy Reviews 82 (2018): 1497-1513	
     # Aero-derivative < 50 MW, Heavy-duty > 50 MW	
-    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_UP_TIME'] = 0.5	
-    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<50), 'MINIMUM_UP_TIME'] = 0.25	
-    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_DOWN_TIME'] = 0.5	
-    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<50), 'MINIMUM_DOWN_TIME'] = 0.25	
-
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_UP_TIME'] = 0.5
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<50), 'MINIMUM_UP_TIME'] = 0.25
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_DOWN_TIME'] = 0.5
+    df_gen.loc[(df_gen.index.str.contains('CT'))&(df_gen['PMAX']<50), 'MINIMUM_DOWN_TIME'] = 0.25
+    # This is to add more flexibility to our model
+    df_gen.loc[(df_gen.index.str.contains('CC NG'))&(df_gen['PMAX']<150), 'MINIMUM_UP_TIME'] = 0.5
+    df_gen.loc[(df_gen.index.str.contains('CC NG'))&(df_gen['PMAX']<150), 'MINIMUM_DOWN_TIME'] = 0.5
 
     # Add start-up and shut-down time in a quick and dirty way
     df_gen.loc[:, 'STARTUP_TIME']  = df_gen.loc[:, 'MINIMUM_UP_TIME']
@@ -396,6 +399,8 @@ def build_118_network():
     network_118.dict_reserve_margin['REGUP'] = 0.05
     network_118.dict_reserve_margin['REGDN'] = 0.05
     network_118.dict_reserve_margin['SPNUP'] = 0.1
+    network_118.dict_reserve_margin['NSR'] = df_gen['PMAX'].max() # The largest gen
+    # network_118.dict_reserve_margin['NSR'] = 0
 
     dfs = GroupDataFrame()
     dfs.df_bus              = df_bus
@@ -765,6 +770,8 @@ def summergo_uced(casename):
                 dict_UnitOnT0State[g]    = 12
     ############################################################################
 
+    network_rted = deepcopy(network)
+    network_rted.dict_reserve_margin['NSR'] = 0 # No need to allocat NSR in RTED since all units are fixed.
     # RTED results
     df_POWER_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
     df_POWER_RTD_ADVISRY = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
@@ -800,7 +807,7 @@ def summergo_uced(casename):
 
     instance = model
     optimizer = SolverFactory('cplex')
-    results = optimizer.solve(instance, options={"mipgap":0.001})
+    results = optimizer.solve(instance, options={"mipgap":0.01})
     instance.solutions.load_from(results)
     msg = 'Model solved at: {:>.2f} s, objective: {:>.2f}'.format(
             time() - t0,
@@ -949,7 +956,7 @@ def summergo_uced(casename):
 
         # Solve RTUC model
         try:
-            results_RTC = optimizer.solve(ins_RTC)
+            results_RTC = optimizer.solve(ins_RTC, options={"mipgap":0.01})
         except:
             print 'Cannot solve RTUC model!'
             IP()
@@ -1035,7 +1042,7 @@ def summergo_uced(casename):
 
             # Create RTED model
             ins_RTD = create_model(
-                network,
+                network_rted,
                 df_busload_RTD.loc[t_s_RTD: t_e_RTD, :], # Only bus load, first dimension time starts from 1, no total load
                 df_genfor_RTD.loc[t_s_RTD: t_e_RTD, :], # Only generation from nonthermal gens, first dim time starts from 1
                 nI_RTD, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
@@ -1114,14 +1121,14 @@ def summergo_uced(casename):
         # dict_UnitOnT0State_RTC = (pd.Series(dict_UnitOnT0State_RTD)/nI_RTDperRTC).to_dict()
         dict_UnitOnT0State_RTC = return_unitont0state(ins_RTC, ins_RTC.TimePeriods.last()) # Because in SUMMER-GO the first time interval of a RTUC run is the last time interval of the previous RTUC run.
         dict_PowerGeneratedT0_RTC = dict_PowerGeneratedT0_RTD
-    
-    # IP()
+
     df_power_start = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
     df_power_end   = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
     df_uniton      = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
     df_regup       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
     df_regdn       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
     df_spnup       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
+    df_nsr         = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
     sr_curtailment = pd.Series(0, index=df_genfor_RTD.index)
 
     for i in range(len(ls_rted)):
@@ -1137,6 +1144,7 @@ def summergo_uced(casename):
             df_regup.at[t_s_RTD, g]  = value(ins_RTD.RegulatingReserveUpAvailable[g, t_s_RTD])
             df_regdn.at[t_s_RTD, g]  = value(ins_RTD.RegulatingReserveDnAvailable[g, t_s_RTD])
             df_spnup.at[t_s_RTD, g]  = value(ins_RTD.SpinningReserveUpAvailable[g, t_s_RTD])
+            df_nsr.at[t_s_RTD, g]    = value(ins_RTD.NonSpinningReserveAvailable[g, t_s_RTD])
     df_power_mean = (df_power_start + df_power_end)/2
 
     # Compare load and supply
@@ -1192,6 +1200,8 @@ def summergo_uced(casename):
     ax2.legend()
     plt.title('RTED results')
     plt.show()
+
+    IP()
 
 if __name__ == '__main__':
     # test_dauc('118')
