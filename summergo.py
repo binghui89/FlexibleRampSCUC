@@ -841,7 +841,7 @@ def summergo_uced(casename):
     content += '\n'
 
     instance = model
-    optimizer = SolverFactory('cplex')
+    optimizer = SolverFactory('gurobi')
     results = optimizer.solve(instance, options={"mipgap":0.01})
     # results = optimizer.solve(instance)
     instance.solutions.load_from(results)
@@ -1302,13 +1302,16 @@ def summergo_uced(casename):
     # IP()
     df_power_start = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_power_end   = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+    df_powermax    = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_uniton      = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_regup       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_regdn       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_spnup       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_nsr         = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     sr_curtailment = pd.Series(0, index=df_genfor_RTD.index)
+    df_dispatch_up = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
 
+    # Collect results for RTED
     for i in range(len(ls_rted)):
         ins_RTD = ls_rted[i]
         t_s_RTD = i + 1
@@ -1316,6 +1319,7 @@ def summergo_uced(casename):
         for g in ins_RTD.AllGenerators:
             df_power_end.at[t_s_RTD, g]   = value(ins_RTD.PowerGenerated[g, t_s_RTD])
             df_power_start.at[t_s_RTD, g] = value(ins_RTD.PowerGeneratedT0[g])
+            df_powermax.at[t_s_RTD, g]    = value(ins_RTD.MaximumPowerAvailable[g, t_s_RTD])
 
         for g in ins_RTD.ThermalGenerators:
             df_uniton.at[t_s_RTD, g] = value(ins_RTD.UnitOn[g, t_s_RTD])
@@ -1323,9 +1327,51 @@ def summergo_uced(casename):
             df_regdn.at[t_s_RTD, g]  = value(ins_RTD.RegulatingReserveDnAvailable[g, t_s_RTD])
             df_spnup.at[t_s_RTD, g]  = value(ins_RTD.SpinningReserveUpAvailable[g, t_s_RTD])
             df_nsr.at[t_s_RTD, g]    = value(ins_RTD.NonSpinningReserveAvailable[g, t_s_RTD])
+
+        for g in ins_RTD.ThermalGenerators_commit:
+            df_dispatch_up.at[t_s_RTD, g] = value(ins_RTD.DispatchLimitsUpper[g, t_s_RTD])
     df_power_mean = (df_power_start + df_power_end)/2
 
-    # Compare load and supply
+    # Results container for RTUC
+    df_power_start_RTC = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    df_power_end_RTC   = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    df_powermax_RTC    = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+    df_dispatch_up_RTC = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+    df_uniton_RTC      = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    df_regup_RTC       = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    df_regdn_RTC       = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    df_spnup_RTC       = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    df_nsr_RTC         = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    sr_curtailment_RTC = pd.Series(0, index=df_genfor_RTC.index)
+    df_dispatch_up_RTC = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+
+    # Collect results for RTUC
+    for ins_RTC in ls_rtuc:
+        t_s_RTC = ins_RTC.TimePeriods.first()
+        t_e_RTC = ins_RTC.TimePeriods.last()
+        for t in range(t_s_RTC, t_e_RTC+1):
+            sr_curtailment_RTC.at[t] = value(ins_RTC.Curtailment[t])
+            for g in ins_RTC.AllGenerators:
+                df_power_end_RTC.at[t, g] = value(ins_RTC.PowerGenerated[g, t])
+                df_powermax_RTC.at[t, g]  = value(ins_RTC.MaximumPowerAvailable[g, t])
+                if t == ins_RTC.TimePeriods.first():
+                    df_power_start_RTC.at[t, g] = value(ins_RTC.PowerGeneratedT0[g])
+                else:
+                    df_power_start_RTC.at[t, g] = value(ins_RTC.PowerGenerated[g, ins_RTC.TimePeriods.prev(t)])
+
+            for g in ins_RTC.ThermalGenerators:
+                df_uniton_RTC.at[t, g] = value(ins_RTC.UnitOn[g, t])
+                df_regup_RTC.at[t, g]  = value(ins_RTC.RegulatingReserveUpAvailable[g, t])
+                df_regdn_RTC.at[t, g]  = value(ins_RTC.RegulatingReserveDnAvailable[g, t])
+                df_spnup_RTC.at[t, g]  = value(ins_RTC.SpinningReserveUpAvailable[g, t])
+                df_nsr_RTC.at[t, g]    = value(ins_RTC.NonSpinningReserveAvailable[g, t])
+
+            for g in ins_RTC.ThermalGenerators_commit:
+                df_dispatch_up_RTC.at[t, g] = value(ins_RTC.DispatchLimitsUpper[g, t])
+    df_power_mean_RTC = (df_power_start_RTC + df_power_end_RTC)/2
+
+    # Compare load and supply, RTED
+    plt.figure()
     ax1 = plt.subplot(1, 1, 1)
     ax2 = ax1.twinx()
     ax1.step(
@@ -1377,7 +1423,78 @@ def summergo_uced(casename):
     ax2.set_ylabel('# of units')
     ax2.legend()
     plt.title('RTED results')
+
+    # Compare load and supply, RTUC
+    plt.figure()
+    ax1 = plt.subplot(1, 1, 1)
+    ax2 = ax1.twinx()
+    ax1.step(
+        df_power_mean_RTC.index,
+        df_power_mean_RTC.values.sum(axis=1),
+        where='post',
+        color='b',
+        label='Generation',
+    )
+    ax1.step(
+        df_busload_RTC.index,
+        df_busload_RTC.values.sum(axis=1),
+        where='post',
+        color='k',
+        label='Total load',
+    )
+    ax1.step(
+        sr_curtailment_RTC.index,
+        sr_curtailment_RTC,
+        color='g',
+        where='post',
+        label='Shedded load'
+    )
+    ax1.fill_between(
+        df_power_mean_RTC.index,
+        df_power_mean_RTC.values.sum(axis=1)-df_regdn_RTC.values.sum(axis=1),
+        df_power_mean_RTC.values.sum(axis=1),
+        color='b',
+        step='post',
+        alpha=0.2,
+    )
+    ax1.fill_between(
+        df_power_mean_RTC.index,
+        df_power_mean_RTC.values.sum(axis=1),
+        df_power_mean_RTC.values.sum(axis=1)+df_regup_RTC.values.sum(axis=1),
+        color='r',
+        step='post',
+        alpha=0.2,
+    )
+    ax1.set_ylabel('MW')
+    ax1.legend()
+    ax2.step(
+        df_uniton_RTC.index,
+        df_uniton_RTC.values.sum(axis=1),
+        where='post',
+        color='r',
+        label='Committed units'
+    )
+    ax2.set_ylabel('# of units')
+    ax2.legend()
+    plt.title('RTUC results')
+
     plt.show()
+
+    flag_write = False
+    if flag_write:
+        df_power_mean.to_csv('df_power_mean.csv')
+        df_power_end.to_csv('df_power_end.csv')
+        df_uniton.to_csv('df_uniton.csv')
+        df_regup.to_csv('df_regup.csv')
+        df_powermax.to_csv('df_powermax.csv')
+        df_dispatch_up.to_csv('df_dispatch_up.csv')
+
+        df_power_mean_RTC.to_csv('df_power_mean_RTC.csv')
+        df_power_end_RTC.to_csv('df_power_end_RTC.csv')
+        df_uniton_RTC.to_csv('df_uniton_RTC.csv')
+        df_regup_RTC.to_csv('df_regup_RTC.csv')
+        df_powermax_RTC.to_csv('df_powermax_RTC.csv')
+        df_dispatch_up_RTC.to_csv('df_dispatch_up_RTC.csv')
 
     IP()
 
