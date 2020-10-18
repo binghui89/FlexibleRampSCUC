@@ -1053,7 +1053,9 @@ def summergo_uced(casename):
         dict_PowerGeneratedT0_RTD = dict_PowerGeneratedT0_RTC
 
         for t_s_RTD in ls_t_ed:
-            t_e_RTD = t_s_RTD  # Total 1 ED intervals in SUMMER-GO
+            t_e_RTD = t_s_RTD + 2 # Total 3 ED intervals if not
+            if t_e_RTD > ls_t_ed[-1]:
+                t_e_RTD = ls_t_ed[-1]  # Cannot exceed the RTUC horizon
 
             dict_uniton_all = MyDataFrame(
                 df_UNITON_RTC2RTD.loc[t_s_RTD: t_e_RTD, network.dict_set_gens['THERMAL']].T
