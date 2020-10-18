@@ -1310,6 +1310,7 @@ def summergo_uced(casename):
     df_nsr         = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     sr_curtailment = pd.Series(0, index=df_genfor_RTD.index)
     df_dispatch_up = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+    df_cost = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=['TotalProductionCost', 'TotalFixedCost', 'TotalCurtailmentCost', 'TotalReserveShortageCost'])
 
     # Collect results for RTED
     for i in range(len(ls_rted)):
@@ -1330,6 +1331,10 @@ def summergo_uced(casename):
 
         for g in ins_RTD.ThermalGenerators_commit:
             df_dispatch_up.at[t_s_RTD, g] = value(ins_RTD.DispatchLimitsUpper[g, t_s_RTD])
+
+        for c in df_cost.columns:
+            df_cost.at[t_s_RTD, c] = value(getattr(ins_RTD, c))
+
     df_power_mean = (df_power_start + df_power_end)/2
 
     # Results container for RTUC
@@ -1344,6 +1349,7 @@ def summergo_uced(casename):
     df_nsr_RTC         = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
     sr_curtailment_RTC = pd.Series(0, index=df_genfor_RTC.index)
     df_dispatch_up_RTC = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+    df_cost_RTC = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=['TotalProductionCost', 'TotalFixedCost', 'TotalCurtailmentCost', 'TotalReserveShortageCost'])
 
     # Collect results for RTUC
     for ins_RTC in ls_rtuc:
@@ -1368,6 +1374,31 @@ def summergo_uced(casename):
 
             for g in ins_RTC.ThermalGenerators_commit:
                 df_dispatch_up_RTC.at[t, g] = value(ins_RTC.DispatchLimitsUpper[g, t])
+
+            for c in df_cost_RTC.columns:
+                if c is 'TotalProductionCost':
+                    tmp = 0
+                    for g in ins_RTC.ThermalGenerators:
+                        tmp = tmp + value(ins_RTC.ProductionCost[g, t])
+                    # df_cost_RTC.at[t, c] = sum(value(ins_RTC.ProductionCost[g, t]) for g in ins_RTC.ThermalGenerators)
+                elif c is 'TotalFixedCost':
+                    # df_cost_RTC.at[t, c] = sum(value(ins_RTC.StartupCost[g, t] + ins_RTC.ShutdownCost[g, t]) for g in ins_RTC.ThermalGenerators)
+                    tmp = 0
+                    for g in ins_RTC.ThermalGenerators:
+                        tmp = tmp + value(ins_RTC.StartupCost[g, t] + ins_RTC.ShutdownCost[g, t])
+                elif c is 'TotalCurtailmentCost':
+                    # df_cost_RTC.at[t, c] = sum(value(ins_RTC.BusVOLL[b]*ins_RTC.BusCurtailment[b,t]*ins_RTC.IntervalHour) for b in ins_RTC.LoadBuses)
+                    tmp = 0
+                    for b in ins_RTC.LoadBuses:
+                        tmp = tmp + value(ins_RTC.BusVOLL[b]*ins_RTC.BusCurtailment[b,t]*ins_RTC.IntervalHour)
+                elif c is 'TotalReserveShortageCost':
+                    tmp = value(
+                        ins_RTC.SpinningReserveUpShortage[t] * 2000 + 
+                        ins_RTC.RegulatingReserveUpShortage[t] * 5500 + 
+                        ins_RTC.RegulatingReserveDnShortage[t] * 5500 + 
+                        ins_RTC.NonSpinningReserveShortage[t] * 2000 # Let's use shortage cost of spinning reserve
+                    )*value(ins_RTC.IntervalHour)
+                df_cost_RTC.at[t, c] = tmp
     df_power_mean_RTC = (df_power_start_RTC + df_power_end_RTC)/2
 
     # Compare load and supply, RTED
@@ -1488,6 +1519,7 @@ def summergo_uced(casename):
         df_regup.to_csv('df_regup.csv')
         df_powermax.to_csv('df_powermax.csv')
         df_dispatch_up.to_csv('df_dispatch_up.csv')
+        df_cost.to_csv('df_cost.csv')
 
         df_power_mean_RTC.to_csv('df_power_mean_RTC.csv')
         df_power_end_RTC.to_csv('df_power_end_RTC.csv')
@@ -1495,6 +1527,7 @@ def summergo_uced(casename):
         df_regup_RTC.to_csv('df_regup_RTC.csv')
         df_powermax_RTC.to_csv('df_powermax_RTC.csv')
         df_dispatch_up_RTC.to_csv('df_dispatch_up_RTC.csv')
+        df_cost_RTC.to_csv('df_cost_RTC.csv')
 
     IP()
 
