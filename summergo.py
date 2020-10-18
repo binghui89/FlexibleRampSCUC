@@ -1335,7 +1335,29 @@ def summergo_uced(casename):
             df_dispatch_up.at[t_s_RTD, g] = value(ins_RTD.DispatchLimitsUpper[g, t_s_RTD])
 
         for c in df_cost.columns:
-            df_cost.at[t_s_RTD, c] = value(getattr(ins_RTD, c))
+            if c is 'TotalProductionCost':
+                tmp = 0
+                for g in ins_RTD.ThermalGenerators:
+                    tmp = tmp + value(ins_RTD.ProductionCost[g, t_s_RTD])
+                # df_cost.at[t_s_RTD, c] = sum(value(ins_RTD.ProductionCost[g, t_s_RTD]) for g in ins_RTD.ThermalGenerators)
+            elif c is 'TotalFixedCost':
+                # df_cost.at[t_s_RTD, c] = sum(value(ins_RTD.StartupCost[g, t_s_RTD] + ins_RTD.ShutdownCost[g, t_s_RTD]) for g in ins_RTD.ThermalGenerators)
+                tmp = 0
+                for g in ins_RTD.ThermalGenerators:
+                    tmp = tmp + value(ins_RTD.StartupCost[g, t_s_RTD] + ins_RTD.ShutdownCost[g, t_s_RTD])
+            elif c is 'TotalCurtailmentCost':
+                # df_cost.at[t_s_RTD, c] = sum(value(ins_RTD.BusVOLL[b]*ins_RTD.BusCurtailment[b,t_s_RTD]*ins_RTD.IntervalHour) for b in ins_RTD.LoadBuses)
+                tmp = 0
+                for b in ins_RTD.LoadBuses:
+                    tmp = tmp + value(ins_RTD.BusVOLL[b]*ins_RTD.BusCurtailment[b,t_s_RTD]*ins_RTD.IntervalHour)
+            elif c is 'TotalReserveShortageCost':
+                tmp = value(
+                    ins_RTD.SpinningReserveUpShortage[t_s_RTD] * 2000 + 
+                    ins_RTD.RegulatingReserveUpShortage[t_s_RTD] * 5500 + 
+                    ins_RTD.RegulatingReserveDnShortage[t_s_RTD] * 5500 + 
+                    ins_RTD.NonSpinningReserveShortage[t_s_RTD] * 2000 # Let's use shortage cost of spinning reserve
+                )*value(ins_RTD.IntervalHour)
+            df_cost.at[t_s_RTD, c] = tmp
 
     df_power_mean = (df_power_start + df_power_end)/2
 
