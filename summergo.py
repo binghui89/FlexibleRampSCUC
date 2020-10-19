@@ -1537,21 +1537,23 @@ def summergo_uced(casename):
 
     flag_write = False
     if flag_write:
-        df_power_mean.to_csv('df_power_mean.csv')
-        df_power_end.to_csv('df_power_end.csv')
-        df_uniton.to_csv('df_uniton.csv')
-        df_regup.to_csv('df_regup.csv')
-        df_powermax.to_csv('df_powermax.csv')
-        df_dispatch_up.to_csv('df_dispatch_up.csv')
-        df_cost.to_csv('df_cost.csv')
+        with pd.ExcelWriter('df_RTD.xlsx') as writer:
+            df_power_mean.to_excel(writer, sheet_name='power_mean')
+            df_power_end.to_excel(writer, sheet_name='power_end')
+            df_uniton.to_excel(writer, sheet_name='uniton')
+            df_regup.to_excel(writer, sheet_name='regup')
+            df_powermax.to_excel(writer, sheet_name='powermax')
+            df_dispatch_up.to_excel(writer, sheet_name='dispatch_up')
+            df_cost.to_excel(writer, sheet_name='cost')
 
-        df_power_mean_RTC.to_csv('df_power_mean_RTC.csv')
-        df_power_end_RTC.to_csv('df_power_end_RTC.csv')
-        df_uniton_RTC.to_csv('df_uniton_RTC.csv')
-        df_regup_RTC.to_csv('df_regup_RTC.csv')
-        df_powermax_RTC.to_csv('df_powermax_RTC.csv')
-        df_dispatch_up_RTC.to_csv('df_dispatch_up_RTC.csv')
-        df_cost_RTC.to_csv('df_cost_RTC.csv')
+        with pd.ExcelWriter('df_RTC.xlsx') as writer:
+            df_power_mean_RTC.to_excel(writer, sheet_name='power_mean')
+            df_power_end_RTC.to_excel(writer, sheet_name='power_end')
+            df_uniton_RTC.to_excel(writer, sheet_name='uniton')
+            df_regup_RTC.to_excel(writer, sheet_name='regup')
+            df_powermax_RTC.to_excel(writer, sheet_name='powermax')
+            df_dispatch_up_RTC.to_excel(writer, sheet_name='dispatch_up')
+            df_cost_RTC.to_excel(writer, sheet_name='cost')
 
     IP()
 
