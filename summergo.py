@@ -541,6 +541,11 @@ def build_texas_network():
     df_gen['STARTUP_RAMP']  = df_gen[['STARTUP_RAMP','PMIN']].max(axis=1)
     df_gen['SHUTDOWN_RAMP'] = df_gen[['SHUTDOWN_RAMP','PMIN']].max(axis=1)
 
+    df_gen.loc[(df_gen.index.str.contains('ng'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_UP_TIME'] = 0.5
+    df_gen.loc[(df_gen.index.str.contains('ng'))&(df_gen['PMAX']<50), 'MINIMUM_UP_TIME'] = 0.25
+    df_gen.loc[(df_gen.index.str.contains('ng'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_DOWN_TIME'] = 0.5
+    df_gen.loc[(df_gen.index.str.contains('ng'))&(df_gen['PMAX']<50), 'MINIMUM_DOWN_TIME'] = 0.25
+
     # Assume renewable sources cost nothing to start
     df_gen.loc[df_gen['GEN_TYPE']=='Renewable', 'STARTUP'] = 0
 
@@ -591,9 +596,10 @@ def build_texas_network():
     network_texas.dict_cost_startup_by_gen = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'STARTUP'].to_dict()
     network_texas.dict_cost_shutdn_by_gen  = df_gen.loc[network_texas.dict_set_gens['THERMAL'], 'SHUTDOWN'].to_dict()
 
-    network_texas.dict_reserve_margin['REGUP'] = 0.05
-    network_texas.dict_reserve_margin['REGDN'] = 0.05
+    network_texas.dict_reserve_margin['REGUP'] = 0.02
+    network_texas.dict_reserve_margin['REGDN'] = 0.02
     network_texas.dict_reserve_margin['SPNUP'] = 0.1
+    network_texas.dict_reserve_margin['NSR'] = 0 # The largest gen
 
     dfs = GroupDataFrame()
     dfs.df_bus              = df_bus
@@ -763,21 +769,22 @@ def summergo_uced(casename):
         # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
         # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
         # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
-        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/loads.csv'
-        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/generator.csv'
-        csv_busload_RTC       = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_load.csv'
-        csv_genfor_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ha_generator.csv'
-        csv_busload_RTD       = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_load.csv'
-        csv_genfor_RTD        = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/ed_generator.csv'
+        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_load.csv'
+        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_generator.csv'
+        csv_busload_RTC       = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_load.csv'
+        csv_genfor_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_generator.csv'
+        # csv_busload_RTD       = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ed_load.csv'
+        # csv_genfor_RTD        = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ed_generator.csv'
 
-        # In the SUMMER-GO test case, we need to run 5-min RTUC runs so use ED data temporarily
-        csv_busload_RTC = csv_busload_RTD
-        csv_genfor_RTC  = csv_genfor_RTD
+        # We don't have the RTED data so we use the RTUC data as RTED data
+        csv_busload_RTD = csv_busload_RTC
+        csv_genfor_RTD  = csv_genfor_RTC
 
         # Prepare day-ahead UC data
         df_busload = pd.read_csv(csv_busload, index_col=0)
         df_genfor  = pd.read_csv(csv_genfor, index_col=0)
-        df_busload = MyDataFrame(df_busload.loc[:, df_busload.columns.difference(['LOAD'])])
+        # df_busload = MyDataFrame(df_busload.loc[:, df_busload.columns.difference(['LOAD'])])
+        df_busload = MyDataFrame(df_busload)
         df_genfor  = MyDataFrame(df_genfor)
         df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
         df_genfor_nonthermal = df_genfor.loc[:, network.dict_set_gens['NONTHERMAL']]
@@ -786,17 +793,19 @@ def summergo_uced(casename):
         # Prepare real-time UC (hourly ahead) data
         df_busload_RTC = pd.read_csv(csv_busload_RTC, index_col=['Slot'])
         df_genfor_RTC  = pd.read_csv(csv_genfor_RTC, index_col=['Slot'])
-        df_busload_RTC = MyDataFrame(df_busload_RTC.loc[:, df_busload_RTC.columns.difference(['LOAD'])])
+        # df_busload_RTC = MyDataFrame(df_busload_RTC.loc[:, df_busload_RTC.columns.difference(['LOAD'])])
+        df_busload_RTC = MyDataFrame(df_busload_RTC)
         df_genfor_RTC  = MyDataFrame(df_genfor_RTC)
-        df_genfor_RTC  = df_genfor_RTC.loc[:, network.dict_set_gens['NONTHERMAL']]
+        # df_genfor_RTC  = df_genfor_RTC.loc[:, network.dict_set_gens['NONTHERMAL']]
         df_genfor_RTC.fillna(0, inplace=True)
 
         # Prepare economic dispatch data
         df_busload_RTD = pd.read_csv(csv_busload_RTD, index_col=['Slot'])
         df_genfor_RTD  = pd.read_csv(csv_genfor_RTD, index_col=['Slot'])
-        df_busload_RTD = MyDataFrame(df_busload_RTD.loc[:, df_busload_RTD.columns.difference(['LOAD'])])
+        # df_busload_RTD = MyDataFrame(df_busload_RTD.loc[:, df_busload_RTD.columns.difference(['LOAD'])])
+        df_busload_RTD = MyDataFrame(df_busload_RTD)
         df_genfor_RTD  = MyDataFrame(df_genfor_RTD)
-        df_genfor_RTD  = df_genfor_RTD.loc[:, network.dict_set_gens['NONTHERMAL']]
+        # df_genfor_RTD  = df_genfor_RTD.loc[:, network.dict_set_gens['NONTHERMAL']]
         df_genfor_RTD.fillna(0, inplace=True)
 
         for g in network.dict_set_gens['ALL']:
@@ -845,10 +854,19 @@ def summergo_uced(casename):
     results = optimizer.solve(instance, options={"mipgap":0.01})
     # results = optimizer.solve(instance)
     instance.solutions.load_from(results)
-    msg = 'Model solved at: {:>.2f} s, objective: {:>.2f}'.format(
+    # msg = 'Model solved at: {:>.2f} s, objective: {:>.2f}'.format(
+    #         time() - t0,
+    #         value(instance.TotalCostObjective)
+    #     )
+    msg = (
+        'Model solved at: {:>.2f} s, '
+        'objective: {:>.2f}, '
+        'penalty: {:>.2f}'.format(
             time() - t0,
-            value(instance.TotalCostObjective)
+            value(instance.TotalCostObjective),
+            value(instance.SlackPenalty),
         )
+    )
     print(msg)
     content += msg
     content += '\n'
@@ -1559,4 +1577,4 @@ def summergo_uced(casename):
 
 if __name__ == '__main__':
     # test_dauc('118')
-    summergo_uced('118')
+    summergo_uced('TX')

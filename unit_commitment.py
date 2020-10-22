@@ -812,7 +812,7 @@ def compute_total_reserve_shortage_cost_rule(m):
 # Compute the penalty cost associated with slack variables
 def SlackPenalty_rule(m):
     return 10000000*sum(
-       m.OverCommit[t] +
+    #    m.OverCommit[t] +
        sum(
             m.Slack_startup_lower[g, t] 
             + m.Slack_startup_upper[g, t] 
@@ -974,6 +974,7 @@ def create_model(
         model.NonThermalGenerators, 
         model.TimePeriods,
         within=NonNegativeReals,
+        default=0.0, 
         initialize=MyDataFrame(df_genfor_nonthermal.T).to_dict_2d(),
         mutable=True
     )
