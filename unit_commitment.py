@@ -827,6 +827,13 @@ def SlackPenalty_rule(m):
        for t in m.TimePeriods
    )
 
+# Compute the penalty cost associatd with over commitment
+def OverCommitPenalty_rule(m):
+    return 10000000*sum(
+       m.OverCommit[t]
+       for t in m.TimePeriods
+    )
+
 # Objectives
 def total_cost_objective_rule(m):
     return (
@@ -834,7 +841,7 @@ def total_cost_objective_rule(m):
         + m.TotalFixedCost 
         + m.TotalCurtailmentCost 
         + m.TotalReserveShortageCost
-    ) + m.SlackPenalty
+    ) + m.SlackPenalty + m.OverCommitPenalty
 
 # Additional dispatch limits for RTUC
 def EnforceGeneratorOutputLimitsDispacthUpper_rule(m, g, t):
@@ -1360,6 +1367,9 @@ def create_model(
     ############################################
     model.SlackPenalty = Expression(
         rule = SlackPenalty_rule
+    )
+    model.OverCommitPenalty = Expression(
+        rule = OverCommitPenalty_rule
     )
     model.DefineHourlyCurtailment = Constraint(
         model.TimePeriods, rule=definition_hourly_curtailment_rule
