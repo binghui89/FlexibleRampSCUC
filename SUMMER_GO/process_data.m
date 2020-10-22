@@ -1,3 +1,4 @@
+%% See how many values are missing there
 T_wind = readtable('Cong/WindBus_Forecasts.csv');
 T_wind.leadtime = T_wind.TimeStamp - T_wind.IssueTime;
 unique_leadtime_wind = unique(T_wind.leadtime);
@@ -23,7 +24,7 @@ for i = 1:length(unique_leadtime_load)
     fprintf('Leadtime: %s, %g in total.\n', unique_leadtime_load(i), size(tmp, 1));
 end
 
-%%
+%% Check missing values for a specific lead time
 t_min = min([min(T_load.TimeStamp), min(T_wind.TimeStamp), min(T_solar.TimeStamp)]);
 t_max = max([max(T_load.TimeStamp), max(T_wind.TimeStamp), max(T_solar.TimeStamp)]);
 time_seq = [t_min: duration(0,5,0): t_max]';
@@ -125,7 +126,34 @@ ar_load_dac = reshape(mean(reshape(ar_load_rtc, 12, numel(ar_load_rtc)/12), 1), 
 T_forecast_dac = [array2table([1:size(ar_wind_dac, 1)]', 'VariableNames', {'Slot'}), array2table(ar_wind_dac, 'VariableNames', genname_wind), array2table(ar_solar_dac, 'VariableNames', genname_solar)]; 
 T_load_dac = [array2table([1:size(ar_load_dac, 1)]', 'VariableNames', {'Slot'}), array2table(ar_load_dac, 'VariableNames', genname_load)];
 
+%% 
+T_nsr = readtable('Cong/NSRR_withLowrBound.csv');
+nsr_names = {'Baseline','NSRR7D','NSRR1D','NSRR1H'};
+time_seq_nsr = [min(T_nsr.TimeStamp): duration(1,0,0): max(T_nsr.TimeStamp)]';
+[Lia,Locb] = ismember(time_seq_nsr, T_nsr.TimeStamp);
+tmp = nan(size(time_seq_nsr, 1), numel(nsr_names));
+tmp(Lia, :) = T_nsr{Locb(Lia), nsr_names};
+T_nsr_aligned = [array2table(time_seq_nsr, 'VariableNames', {'TIME'}), array2table(tmp, 'VariableNames', nsr_names)];
+rows_select = (T_nsr_aligned.TIME.Year==this_y)&(T_nsr_aligned.TIME.Month==this_m)&(T_nsr_aligned.TIME.Day==this_d);
+
+ar_nsr_dac = T_nsr_aligned{rows_select, {'NSRR1D'}};
+ar_nsr_rtc = repmat(T_nsr_aligned{rows_select, {'NSRR1H'}}', 12, 1);
+ar_nsr_rtc = ar_nsr_rtc(:);
+
+ar_nsr_dac_base = T_nsr_aligned{rows_select, {'Baseline'}};
+ar_nsr_rtc_base = repmat(T_nsr_aligned{rows_select, {'Baseline'}}', 12, 1);
+ar_nsr_rtc_base = ar_nsr_rtc_base(:);
+
+T_nsr_dac = [array2table([1:size(ar_nsr_dac, 1)]', 'VariableNames', {'Slot'}), array2table(ar_nsr_dac, 'VariableNames', {'NSR'})];
+T_nsr_rtc = [array2table([1:size(ar_nsr_rtc, 1)]', 'VariableNames', {'Slot'}), array2table(ar_nsr_rtc, 'VariableNames', {'NSR'})];
+T_nsr_dac_base = [array2table([1:size(ar_nsr_dac_base, 1)]', 'VariableNames', {'Slot'}), array2table(ar_nsr_dac_base, 'VariableNames', {'NSR'})];
+T_nsr_rtc_base = [array2table([1:size(ar_nsr_rtc_base, 1)]', 'VariableNames', {'Slot'}), array2table(ar_nsr_rtc_base, 'VariableNames', {'NSR'})];
+
 % writetable(T_forecast_dac, 'da_generator.csv');
 % writetable(T_load_dac, 'da_load.csv');
 % writetable(T_load_rtc, 'ha_load.csv');
 % writetable(T_forecast_rtc, 'ha_generator.csv');
+% writetable(T_nsr_dac, 'da_nsr.csv');
+% writetable(T_nsr_rtc, 'ha_nsr.csv');
+% writetable(T_nsr_dac_base, 'da_nsr_base.csv');
+% writetable(T_nsr_rtc_base, 'ha_nsr_base.csv');
