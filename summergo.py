@@ -1,4 +1,4 @@
-import os, sys, platform, datetime, smtplib, multiprocessing, pandas as pd, numpy as np, matplotlib
+import os, sys, getopt, platform, datetime, smtplib, multiprocessing, pandas as pd, numpy as np, matplotlib
 from time import time
 from pyomo.opt import SolverFactory, SolverStatus, TerminationCondition
 from postprocessing import store_csvs
@@ -465,7 +465,7 @@ def build_texas_network():
     df_blockmargcost    = pd.read_csv(csv_blockmarginalcost, index_col=0)
     df_blockoutputlimit = pd.read_csv(csv_blockoutputlimit,  index_col=0)
 
-    df_bus['VOLL'] = 9000
+    df_bus['VOLL'] = 9000*2
     baseMVA = 100
 
     # Enforce the 230 kV limits
@@ -477,12 +477,6 @@ def build_texas_network():
         and df_branch.loc[i,'T_BUS'] in bus_kVlevel_set
     }
     df_ptdf = df_ptdf.loc[set_branch_enforced,:].copy()
-
-    # Add start-up and shut-down time in a quick and dirty way
-    df_gen.loc[:, 'STARTUP_TIME']  = df_gen.loc[:, 'MINIMUM_UP_TIME']
-    df_gen.loc[:, 'SHUTDOWN_TIME'] = df_gen.loc[:, 'MINIMUM_UP_TIME']
-    # df_gen.loc[df_gen['STARTUP_TIME']>=12,   'STARTUP_TIME']  = 12
-    # df_gen.loc[df_gen['SHUTDOWN_TIME']>=12, 'SHUTDOWN_TIME']  = 12
 
      # AGC related parameters, need update
     df_gen['AGC_MODE'] = 'RAW' # Possible options: NA, RAW, SMOOTH, CPS2
@@ -545,6 +539,12 @@ def build_texas_network():
     df_gen.loc[(df_gen.index.str.contains('ng'))&(df_gen['PMAX']<50), 'MINIMUM_UP_TIME'] = 0.25
     df_gen.loc[(df_gen.index.str.contains('ng'))&(df_gen['PMAX']<100)&(df_gen['PMAX']>=50), 'MINIMUM_DOWN_TIME'] = 0.5
     df_gen.loc[(df_gen.index.str.contains('ng'))&(df_gen['PMAX']<50), 'MINIMUM_DOWN_TIME'] = 0.25
+
+    # Add start-up and shut-down time in a quick and dirty way
+    df_gen.loc[:, 'STARTUP_TIME']  = df_gen.loc[:, 'MINIMUM_UP_TIME']
+    df_gen.loc[:, 'SHUTDOWN_TIME'] = df_gen.loc[:, 'MINIMUM_UP_TIME']
+    # df_gen.loc[df_gen['STARTUP_TIME']>=12,   'STARTUP_TIME']  = 12
+    # df_gen.loc[df_gen['SHUTDOWN_TIME']>=12, 'SHUTDOWN_TIME']  = 12
 
     # Assume renewable sources cost nothing to start
     df_gen.loc[df_gen['GEN_TYPE']=='Renewable', 'STARTUP'] = 0
@@ -612,7 +612,7 @@ def build_texas_network():
 
     return dfs, network_texas
 
-def summergo_uced(casename):
+def summergo_uced(casename, scenarioname):
     t0 = time()
     content = ''
 
@@ -775,6 +775,14 @@ def summergo_uced(casename):
         csv_genfor_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_generator.csv'
         # csv_busload_RTD       = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ed_load.csv'
         # csv_genfor_RTD        = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ed_generator.csv'
+        if scenarioname == 'base':
+            csv_nsr               = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_nsr_base.csv'
+            csv_nsr_RTC           = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_nsr_base.csv'
+            print('Load base NSR!')
+        elif scenarioname == 'dynamic':
+            csv_nsr               = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_nsr.csv'
+            csv_nsr_RTC           = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_nsr.csv'
+            print('Load dynamic NSR!')
 
         # We don't have the RTED data so we use the RTUC data as RTED data
         csv_busload_RTD = csv_busload_RTC
@@ -789,6 +797,7 @@ def summergo_uced(casename):
         df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
         df_genfor_nonthermal = df_genfor.loc[:, network.dict_set_gens['NONTHERMAL']]
         df_genfor_nonthermal.fillna(0, inplace=True)
+        df_nsr = pd.read_csv(csv_nsr, index_col = 0)
 
         # Prepare real-time UC (hourly ahead) data
         df_busload_RTC = pd.read_csv(csv_busload_RTC, index_col=['Slot'])
@@ -798,6 +807,7 @@ def summergo_uced(casename):
         df_genfor_RTC  = MyDataFrame(df_genfor_RTC)
         # df_genfor_RTC  = df_genfor_RTC.loc[:, network.dict_set_gens['NONTHERMAL']]
         df_genfor_RTC.fillna(0, inplace=True)
+        df_nsr_RTC = pd.read_csv(csv_nsr_RTC, index_col = 0)
 
         # Prepare economic dispatch data
         df_busload_RTD = pd.read_csv(csv_busload_RTD, index_col=['Slot'])
@@ -816,6 +826,9 @@ def summergo_uced(casename):
 
     network_rted = deepcopy(network)
     network_rted.dict_reserve_margin['NSR'] = 0 # No need to allocat NSR in RTED since all units are fixed.
+    network_dauc = deepcopy(network)
+    network_dauc.dict_reserve_margin['NSR'] = df_nsr['NSR'].to_dict()
+    network_rtuc = deepcopy(network)
     # RTED results
     df_POWER_RTD_BINDING = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
     df_POWER_RTD_ADVISRY = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=network.dict_set_gens['ALL'])
@@ -836,7 +849,7 @@ def summergo_uced(casename):
     # Start DAUC
     ############################################################################
     model = create_model(
-        network,
+        network_dauc,
         df_busload,
         df_genfor_nonthermal,
         nI=nI_DAC,
@@ -985,9 +998,11 @@ def summergo_uced(casename):
             df_SIGMADN_DAC2RTC.loc[t_s_RTC: t_e_RTC, network.dict_set_gens['THERMAL_slow']].T
         ).to_dict_2d()
 
+        network_rtuc.dict_reserve_margin['NSR'] = df_nsr_RTC.loc[t_s_RTC: t_e_RTC, 'NSR'].to_dict()
+
         # Create RTUC model
         ins_RTC = create_model(
-            network,
+            network_rtuc,
             df_busload_RTC.loc[t_s_RTC: t_e_RTC, :], # Only bus load, first dimension time starts from 1, no total load
             df_genfor_RTC.loc[t_s_RTC: t_e_RTC, :], # Only generation from nonthermal gens, first dim time starts from 1
             nI_RTC, # Number of intervals in an hour, typically DAUC: 1, RTUC: 4
@@ -1323,14 +1338,15 @@ def summergo_uced(casename):
     df_power_start = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_power_end   = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_powermax    = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
-    df_uniton      = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
-    df_regup       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
-    df_regdn       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
-    df_spnup       = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
-    df_nsr         = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     sr_curtailment = pd.Series(0, index=df_genfor_RTD.index)
+    df_uniton      = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+    df_regup       = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+    df_regdn       = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+    df_spnup       = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
+    df_nsr         = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_dispatch_up = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_cost = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=['TotalProductionCost', 'TotalFixedCost', 'TotalCurtailmentCost', 'TotalReserveShortageCost'])
+    df_imba = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=['Curtailment', 'RegulatingReserveUpShortage', 'RegulatingReserveDnShortage', 'SpinningReserveUpShortage', 'NonSpinningReserveShortage', 'OverCommit'])
 
     # Collect results for RTED
     for i in range(len(ls_rted)):
@@ -1377,21 +1393,25 @@ def summergo_uced(casename):
                 )*value(ins_RTD.IntervalHour)
             df_cost.at[t_s_RTD, c] = tmp
 
+        for c in df_imba.columns:
+            tmp = getattr(ins_RTD, c)
+            df_imba.loc[t_s_RTD, c] = value(tmp[t_s_RTD])
+
     df_power_mean = (df_power_start + df_power_end)/2
 
     # Results container for RTUC
     df_power_start_RTC = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
     df_power_end_RTC   = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
     df_powermax_RTC    = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
-    df_dispatch_up_RTC = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
-    df_uniton_RTC      = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
     df_regup_RTC       = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
-    df_regdn_RTC       = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
-    df_spnup_RTC       = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
-    df_nsr_RTC         = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
     sr_curtailment_RTC = pd.Series(0, index=df_genfor_RTC.index)
+    df_regdn_RTC       = MyDataFrame(np.nan, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    df_spnup_RTC       = MyDataFrame(np.nan, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    df_nsr_RTC         = MyDataFrame(np.nan, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
+    df_uniton_RTC      = MyDataFrame(np.nan, index=df_genfor_RTC.index, columns=dfs.df_gen.index.tolist())
     df_dispatch_up_RTC = MyDataFrame(np.nan, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_cost_RTC = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=['TotalProductionCost', 'TotalFixedCost', 'TotalCurtailmentCost', 'TotalReserveShortageCost'])
+    df_imba_RTC = MyDataFrame(0.0, index=df_genfor_RTC.index, columns=['Curtailment', 'RegulatingReserveUpShortage', 'RegulatingReserveDnShortage', 'SpinningReserveUpShortage', 'NonSpinningReserveShortage', 'OverCommit'])
 
     # Collect results for RTUC
     for ins_RTC in ls_rtuc:
@@ -1441,6 +1461,11 @@ def summergo_uced(casename):
                         ins_RTC.NonSpinningReserveShortage[t] * 2000 # Let's use shortage cost of spinning reserve
                     )*value(ins_RTC.IntervalHour)
                 df_cost_RTC.at[t, c] = tmp
+
+            for c in df_imba_RTC.columns:
+                tmp = getattr(ins_RTC, c)
+                df_imba_RTC.loc[t, c] = value(tmp[t])
+
     df_power_mean_RTC = (df_power_start_RTC + df_power_end_RTC)/2
 
     # Compare load and supply, RTED
@@ -1560,21 +1585,46 @@ def summergo_uced(casename):
             df_power_end.to_excel(writer, sheet_name='power_end')
             df_uniton.to_excel(writer, sheet_name='uniton')
             df_regup.to_excel(writer, sheet_name='regup')
+            df_nsr.to_excel(writer, sheet_name='nsr')
             df_powermax.to_excel(writer, sheet_name='powermax')
             df_dispatch_up.to_excel(writer, sheet_name='dispatch_up')
             df_cost.to_excel(writer, sheet_name='cost')
+            df_imba.to_excel(writer, sheet_name='imbalance')
 
         with pd.ExcelWriter('df_RTC.xlsx') as writer:
             df_power_mean_RTC.to_excel(writer, sheet_name='power_mean')
             df_power_end_RTC.to_excel(writer, sheet_name='power_end')
             df_uniton_RTC.to_excel(writer, sheet_name='uniton')
             df_regup_RTC.to_excel(writer, sheet_name='regup')
+            df_nsr_RTC.to_excel(writer, sheet_name='nsr')
             df_powermax_RTC.to_excel(writer, sheet_name='powermax')
             df_dispatch_up_RTC.to_excel(writer, sheet_name='dispatch_up')
             df_cost_RTC.to_excel(writer, sheet_name='cost')
+            df_imba_RTC.to_excel(writer, sheet_name='imbalance')
 
     IP()
 
 if __name__ == '__main__':
+    argv = sys.argv[1:]
+    opts, args = getopt.getopt(argv, "hc:s:", ["help", "case=", "scenario="])
+    print(opts)
+    inputs = dict(opts)
+
+    case = None
+    scenario = None
+
+    if inputs is None:
+        raise "no arguments found"
+        sys.exit()
+
+    for opt, arg in inputs.iteritems():
+        if opt in ("-c", "--case"):
+            case = arg
+        elif opt in ("-s", "--scenario"):
+            scenario = arg
+        elif opt in ("-h", "--help") :
+            print "Use as :\n    python summergo.py -c <case> -s <scenario>    Use -h for help."                          
+            sys.exit()
+
     # test_dauc('118')
-    summergo_uced('TX')
+    summergo_uced(case, scenario)
