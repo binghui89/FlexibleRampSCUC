@@ -1474,14 +1474,14 @@ def summergo_uced(casename, scenarioname):
     ax2 = ax1.twinx()
     ax1.step(
         df_power_mean.index,
-        df_power_mean.values.sum(axis=1),
+        df_power_mean.sum(axis=1),
         where='post',
         color='b',
         label='Generation',
     )
     ax1.step(
         df_busload_RTD.index,
-        df_busload_RTD.values.sum(axis=1),
+        df_busload_RTD.sum(axis=1),
         where='post',
         color='k',
         label='Total load',
@@ -1495,16 +1495,16 @@ def summergo_uced(casename, scenarioname):
     )
     ax1.fill_between(
         df_power_mean.index,
-        df_power_mean.values.sum(axis=1)-df_regdn.values.sum(axis=1),
-        df_power_mean.values.sum(axis=1),
+        df_power_mean.sum(axis=1)-df_regdn.sum(axis=1),
+        df_power_mean.sum(axis=1),
         color='b',
         step='post',
         alpha=0.2,
     )
     ax1.fill_between(
         df_power_mean.index,
-        df_power_mean.values.sum(axis=1),
-        df_power_mean.values.sum(axis=1)+df_regup.values.sum(axis=1),
+        df_power_mean.sum(axis=1),
+        df_power_mean.sum(axis=1)+df_regup.sum(axis=1),
         color='r',
         step='post',
         alpha=0.2,
@@ -1513,7 +1513,7 @@ def summergo_uced(casename, scenarioname):
     ax1.legend()
     ax2.step(
         df_uniton.index,
-        df_uniton.values.sum(axis=1),
+        df_uniton.sum(axis=1),
         where='post',
         color='r',
         label='Committed units'
@@ -1528,14 +1528,14 @@ def summergo_uced(casename, scenarioname):
     ax2 = ax1.twinx()
     ax1.step(
         df_power_mean_RTC.index,
-        df_power_mean_RTC.values.sum(axis=1),
+        df_power_mean_RTC.sum(axis=1),
         where='post',
         color='b',
         label='Generation',
     )
     ax1.step(
         df_busload_RTC.index,
-        df_busload_RTC.values.sum(axis=1),
+        df_busload_RTC.sum(axis=1),
         where='post',
         color='k',
         label='Total load',
@@ -1549,16 +1549,16 @@ def summergo_uced(casename, scenarioname):
     )
     ax1.fill_between(
         df_power_mean_RTC.index,
-        df_power_mean_RTC.values.sum(axis=1)-df_regdn_RTC.values.sum(axis=1),
-        df_power_mean_RTC.values.sum(axis=1),
+        df_power_mean_RTC.sum(axis=1)-df_regdn_RTC.sum(axis=1),
+        df_power_mean_RTC.sum(axis=1),
         color='b',
         step='post',
         alpha=0.2,
     )
     ax1.fill_between(
         df_power_mean_RTC.index,
-        df_power_mean_RTC.values.sum(axis=1),
-        df_power_mean_RTC.values.sum(axis=1)+df_regup_RTC.values.sum(axis=1),
+        df_power_mean_RTC.sum(axis=1),
+        df_power_mean_RTC.sum(axis=1)+df_regup_RTC.sum(axis=1),
         color='r',
         step='post',
         alpha=0.2,
@@ -1567,7 +1567,7 @@ def summergo_uced(casename, scenarioname):
     ax1.legend()
     ax2.step(
         df_uniton_RTC.index,
-        df_uniton_RTC.values.sum(axis=1),
+        df_uniton_RTC.sum(axis=1),
         where='post',
         color='r',
         label='Committed units'
