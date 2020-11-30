@@ -1,5 +1,5 @@
 %% See how many values are missing there
-T_wind = readtable('Cong/WindBus_Forecasts.csv');
+T_wind = readtable('Cong/2Binghui/WindBus_Forecasts.csv');
 T_wind.leadtime = T_wind.TimeStamp - T_wind.IssueTime;
 unique_leadtime_wind = unique(T_wind.leadtime);
 for i = 1:length(unique_leadtime_wind)
@@ -7,7 +7,7 @@ for i = 1:length(unique_leadtime_wind)
     fprintf('Leadtime: %s, %g in total.\n', unique_leadtime_wind(i), size(tmp, 1));
 end
 
-T_solar = readtable('Cong/22SolarSite_Forecasts.csv');
+T_solar = readtable('Cong/2Binghui/22SolarSite_Forecasts.csv');
 T_solar.leadtime = T_solar.TimeStamp - T_solar.IssueTime;
 unique_leadtime_solar = unique(T_solar.leadtime);
 for i = 1:length(unique_leadtime_solar)
@@ -127,7 +127,7 @@ T_forecast_dac = [array2table([1:size(ar_wind_dac, 1)]', 'VariableNames', {'Slot
 T_load_dac = [array2table([1:size(ar_load_dac, 1)]', 'VariableNames', {'Slot'}), array2table(ar_load_dac, 'VariableNames', genname_load)];
 
 %% 
-T_nsr = readtable('Cong/NSRR_withLowrBound.csv');
+T_nsr = readtable('Cong/2Binghui/NSRR_withLowrBound.csv');
 nsr_names = {'Baseline','NSRR7D','NSRR1D','NSRR1H'};
 time_seq_nsr = [min(T_nsr.TimeStamp): duration(1,0,0): max(T_nsr.TimeStamp)]';
 [Lia,Locb] = ismember(time_seq_nsr, T_nsr.TimeStamp);
