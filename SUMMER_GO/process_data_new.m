@@ -173,7 +173,19 @@ tmp = nan(size(time_seq_da, 1), numel(genname_wind));
 tmp(Lia, :) = Tf_wind_da{Locb(Lia), genname_wind};
 Tf_wind_da_aligned = [array2table(time_seq_da, 'VariableNames', {'TIME'}), array2table(tmp, 'VariableNames', genname_wind)];
 
+% Solar DA forecast
+tmp = [Tf_solar_ha_aligned{1:end, 2:end};nan(1, 22)];
+tmp = reshape(tmp(:), 12, numel(tmp)/12);
+tmp = mean(tmp, 1);
+tmp = reshape(tmp, 8760, numel(tmp)/8760);
+Tf_solar_da_aligned = [array2table(time_seq_da, 'VariableNames', {'TIME'}), array2table(tmp, 'VariableNames', genname_solar)];
+
 % Take a look at the complete sets of wind forecast
 stairs(Tf_wind_da_aligned.TIME-duration(1, 0, 0), Tf_wind_da_aligned.wind0, 'g');
 hold on; stairs(Ta_wind_aligned.TIME-duration(0, 5, 0), Ta_wind_aligned.wind0, 'k');
 stairs(Tf_wind_ha_aligned.TIME-duration(0, 5, 0), Tf_wind_ha_aligned.wind0, 'b');
+
+% Take a look at the complete sets of solar forecast
+stairs(Tf_solar_da_aligned.TIME-duration(1, 0, 0), Tf_solar_da_aligned.solar109, 'g');
+hold on; stairs(Ta_solar_aligned.TIME-duration(0, 5, 0), Ta_solar_aligned.solar109, 'k');
+stairs(Tf_solar_ha_aligned.TIME-duration(0, 5, 0), Tf_solar_ha_aligned.solar109, 'b');
