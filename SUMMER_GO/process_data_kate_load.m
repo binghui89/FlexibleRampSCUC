@@ -1,8 +1,8 @@
 %% Load actual 5-min data
 
-t0 = datetime(2017, 12, 31, 23, 05, 00);
+t0 = datetime(2017, 12, 31, 23, 05, 00); % This is the (ending) timestamp of the first interval
 timestep = h5read('Kate/5-minute_load_actuals.h5', '/Timestep');
-t5 = t0 + [1:105120]'.*duration(0, 5, 0);
+t5 = t0 + [1-1:105120-1]'.*duration(0, 5, 0);
 load_actual = h5read('Kate/5-minute_load_actuals.h5', '/ERCOT');
 
 
