@@ -6,7 +6,7 @@ Tf_wind_ha.leadtime = Tf_wind_ha.TimeStamp - Tf_wind_ha.IssueTime;
 unique_leadtime_wind = unique(Tf_wind_ha.leadtime);
 for i = 1:length(unique_leadtime_wind)
     tmp = Tf_wind_ha(Tf_wind_ha.leadtime==unique_leadtime_wind(i), :);
-    fprintf('Solar, Leadtime: %s, %g in total.\n', unique_leadtime_wind(i), size(tmp, 1));
+    fprintf('Wind, Leadtime: %s, %g in total.\n', unique_leadtime_wind(i), size(tmp, 1));
 end
 
 Tf_wind_da = readtable('Cong/Forecasts2Binghui/Wind_debug/WindBus_ForecastDA.csv');
@@ -132,7 +132,13 @@ end
 selected_leadtime = duration(1, 0, 0);
 t_min_da = min([min(Tf_wind_da.INTERVAL_ENDING)]);
 t_max_da = max([max(Tf_wind_da.INTERVAL_ENDING)]);
-time_seq_da = [t_min_da: duration(1,0,0): t_max]';
+time_seq_da = [t_min_da: duration(1,0,0): t_max_da]';
+
+t_min = min([min(Tf_wind_ha.TimeStamp), min(Tf_solar_ha.TimeStamp)]);
+t_max = max([max(Tf_wind_ha.TimeStamp), max(Tf_solar_ha.TimeStamp)]);
+time_seq_5m = [t_min: duration(0,5,0): t_max]';
+
+genname_wind = Tf_wind_ha.Properties.VariableNames(contains(Tf_wind_ha.Properties.VariableNames, 'wind'));
 
 % Solar actual
 Ta_solar_selected = Ta_solar(Ta_solar.leadtime==selected_leadtime, :);
