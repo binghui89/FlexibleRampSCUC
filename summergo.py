@@ -769,12 +769,23 @@ def summergo_uced(casename, scenarioname):
         # csv_marginalcost      = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/marginalcost.csv'
         # csv_blockmarginalcost = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockmarginalcost.csv'
         # csv_blockoutputlimit  = '/home/bxl180002/git/FlexibleRampSCUC/TEXAS2k_B/blockoutputlimit.csv'
-        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_load.csv'
-        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_generator.csv'
-        csv_busload_RTC       = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_load.csv'
-        csv_genfor_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_generator.csv'
-        # csv_busload_RTD       = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ed_load.csv'
-        # csv_genfor_RTD        = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ed_generator.csv'
+
+        # csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_load.csv'
+        # csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_generator.csv'
+        # csv_busload_RTC       = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_load.csv'
+        # csv_genfor_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_generator.csv'
+        # # We don't have the RTED data so we use the RTUC data as RTED data
+        # csv_busload_RTD = csv_busload_RTC
+        # csv_genfor_RTD  = csv_genfor_RTC
+
+        # Cong's updated data
+        csv_busload           = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_loads.20180102.csv'
+        csv_genfor            = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_gen.20180102.csv'
+        csv_busload_RTC       = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_loads.20180102.csv'
+        csv_genfor_RTC        = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_gen.20180102.csv'
+        csv_busload_RTD       = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ed_loads.20180102.csv'
+        csv_genfor_RTD        = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ed_gen.20180102.csv'
+
         if scenarioname == 'base':
             csv_nsr               = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/da_nsr_base.csv'
             csv_nsr_RTC           = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_nsr_base.csv'
@@ -784,9 +795,6 @@ def summergo_uced(casename, scenarioname):
             csv_nsr_RTC           = '/home/bxl180002/git/FlexibleRampSCUC/SUMMER_GO/ha_nsr.csv'
             print('Load dynamic NSR!')
 
-        # We don't have the RTED data so we use the RTUC data as RTED data
-        csv_busload_RTD = csv_busload_RTC
-        csv_genfor_RTD  = csv_genfor_RTC
 
         # Prepare day-ahead UC data
         df_busload = pd.read_csv(csv_busload, index_col=0)
@@ -863,7 +871,7 @@ def summergo_uced(casename, scenarioname):
     content += '\n'
 
     instance = model
-    optimizer = SolverFactory('gurobi')
+    optimizer = SolverFactory('cplex')
     results = optimizer.solve(instance, options={"mipgap":0.01})
     # results = optimizer.solve(instance)
     instance.solutions.load_from(results)
