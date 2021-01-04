@@ -8,6 +8,7 @@ from email.mime.text import MIMEText
 from numpy import sign
 from matplotlib import pyplot as plt
 from unit_commitment import GroupDataFrame, MyDataFrame, NewNetwork, create_model
+from unit_commitment_initial import create_model_initial
 from copy import deepcopy
 from IPython import embed as IP
 
@@ -853,6 +854,55 @@ def summergo_uced(casename, scenarioname):
 
     ls_rtuc = list()
     ls_rted = list()
+
+    # Initial run use DAUC data at the first time interval
+    model_initial = create_model_initial(
+        network_dauc,
+        df_busload.loc[1:1, :],
+        df_genfor_nonthermal.loc[1:1, :],
+        flow_limits=False,
+    )
+    msg = 'Model (initial) created at: {:>.2f} s'.format(time() - t0)
+    print(msg)
+    content += msg
+    content += '\n'
+
+    instance_initial = model_initial
+    optimizer = SolverFactory('cplex')
+    results_initial = optimizer.solve(instance_initial, options={"mipgap":0.01})
+    # results = optimizer.solve(instance)
+    instance_initial.solutions.load_from(results_initial)
+
+    msg = (
+        'Model (initial) solved at: {:>.2f} s, '
+        'objective: {:>.2f}, '
+        'production cost: {:>.2f}'.format(
+            time() - t0,
+            value(instance_initial.TotalCostObjective),
+            value(instance_initial.TotalProductionCost),
+        )
+    )
+    print(msg)
+    content += msg
+    content += '\n'
+
+    df_results_initial = pd.DataFrame(np.nan, index=instance_initial.AllGenerators, columns=['UnitOn', 'MinimumPowerOutput', 'MinimumPowerAvailable', 'PowerGenerated', 'MaximumPowerAvailable', 'MaximumPowerOutput'])
+    for g in instance_initial.AllGenerators:
+        df_results_initial.at[g, 'MinimumPowerAvailable'] = value(instance_initial.MinimumPowerAvailable[g, 1])
+        df_results_initial.at[g, 'PowerGenerated'] = value(instance_initial.PowerGenerated[g, 1])
+        df_results_initial.at[g, 'MaximumPowerAvailable'] = value(instance_initial.MaximumPowerAvailable[g, 1])
+        if g in instance_initial.ThermalGenerators:
+            df_results_initial.at[g, 'MinimumPowerOutput'] = value(instance_initial.MinimumPowerOutput[g])
+            df_results_initial.at[g, 'MaximumPowerOutput'] = value(instance_initial.MaximumPowerOutput[g])
+            df_results_initial.at[g, 'UnitOn'] = value(instance_initial.UnitOn[g, 1])
+
+    # IP()
+
+    dict_PowerGeneratedT0 = df_results_initial.loc[:, 'PowerGenerated'].to_dict()
+    sr_UnitOnT0State = df_results_initial.loc[:, 'UnitOn'].dropna().astype('int')
+    sr_UnitOnT0State[sr_UnitOnT0State==0] = -1 # negative indicates offline in dict_UnitOnT0State
+    sr_UnitOnT0State = sr_UnitOnT0State*24 # A long enough time to ensure every gen is either online or offline, not starting up or shuting down
+    dict_UnitOnT0State = sr_UnitOnT0State.to_dict()
 
     # Start DAUC
     ############################################################################
