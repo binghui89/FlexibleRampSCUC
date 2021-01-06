@@ -806,7 +806,10 @@ def summergo_uced(casename, scenarioname):
         df_genfor.index = range(1, 25) # Kwami's convention: time starts from 1...
         df_genfor_nonthermal = df_genfor.loc[:, network.dict_set_gens['NONTHERMAL']]
         df_genfor_nonthermal.fillna(0, inplace=True)
-        df_nsr = pd.read_csv(csv_nsr, index_col = 0)
+        if scenarioname == 'nonsr':
+            df_nsr = pd.DataFrame({'Slot': np.arange(1, 25), 'NSR': np.zeros(24)}).set_index('Slot')
+        else:
+            df_nsr = pd.read_csv(csv_nsr, index_col = 0)
 
         # Prepare real-time UC (hourly ahead) data
         df_busload_RTC = pd.read_csv(csv_busload_RTC, index_col=['Slot'])
@@ -816,7 +819,10 @@ def summergo_uced(casename, scenarioname):
         df_genfor_RTC  = MyDataFrame(df_genfor_RTC)
         # df_genfor_RTC  = df_genfor_RTC.loc[:, network.dict_set_gens['NONTHERMAL']]
         df_genfor_RTC.fillna(0, inplace=True)
-        df_nsr_RTC = pd.read_csv(csv_nsr_RTC, index_col = 0)
+        if scenarioname == 'nonsr':
+            df_nsr_RTC = pd.DataFrame({'Slot': np.arange(1, 289), 'NSR': np.zeros(288)}).set_index('Slot')
+        else:
+            df_nsr_RTC = pd.read_csv(csv_nsr_RTC, index_col = 0)
 
         # Prepare economic dispatch data
         df_busload_RTD = pd.read_csv(csv_busload_RTD, index_col=['Slot'])
