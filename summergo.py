@@ -1399,6 +1399,70 @@ def summergo_uced(casename, scenarioname):
 
 
     # IP()
+    # Results container for DAUC
+    df_power_start_DAC = MyDataFrame(0.0, index=df_genfor.index, columns=dfs.df_gen.index.tolist())
+    df_power_end_DAC   = MyDataFrame(0.0, index=df_genfor.index, columns=dfs.df_gen.index.tolist())
+    df_powermax_DAC    = MyDataFrame(0.0, index=df_genfor.index, columns=dfs.df_gen.index.tolist())
+    sr_curtailment_DAC = pd.Series(0, index=df_genfor.index)
+    df_uniton_DAC      = MyDataFrame(np.nan, index=df_genfor.index, columns=dfs.df_gen.index.tolist())
+    df_regup_DAC       = MyDataFrame(np.nan, index=df_genfor.index, columns=dfs.df_gen.index.tolist())
+    df_regdn_DAC       = MyDataFrame(np.nan, index=df_genfor.index, columns=dfs.df_gen.index.tolist())
+    df_spnup_DAC       = MyDataFrame(np.nan, index=df_genfor.index, columns=dfs.df_gen.index.tolist())
+    df_nsr_DAC         = MyDataFrame(np.nan, index=df_genfor.index, columns=dfs.df_gen.index.tolist())
+    df_dispatch_up_DAC = MyDataFrame(np.nan, index=df_genfor.index, columns=dfs.df_gen.index.tolist())
+    df_cost_DAC = MyDataFrame(0.0, index=df_genfor.index, columns=['TotalProductionCost', 'TotalFixedCost', 'TotalCurtailmentCost', 'TotalReserveShortageCost'])
+    df_imba_DAC = MyDataFrame(0.0, index=df_genfor.index, columns=['Curtailment', 'RegulatingReserveUpShortage', 'RegulatingReserveDnShortage', 'SpinningReserveUpShortage', 'NonSpinningReserveShortage', 'OverCommit'])
+
+    # Collect results for DAUC
+    for i in instance.TimePeriods:
+        sr_curtailment_DAC.at[i] = value(instance.Curtailment[i])
+        for g in instance.AllGenerators:
+            df_power_end_DAC.at[i, g]   = value(instance.PowerGenerated[g, i])
+            df_power_start_DAC.at[i, g] = value(instance.PowerGeneratedT0[g])
+            df_powermax_DAC.at[i, g]    = value(instance.MaximumPowerAvailable[g, i])
+
+        for g in instance.ThermalGenerators:
+            df_uniton_DAC.at[i, g] = value(instance.UnitOn[g, i])
+            df_regup_DAC.at[i, g]  = value(instance.RegulatingReserveUpAvailable[g, i])
+            df_regdn_DAC.at[i, g]  = value(instance.RegulatingReserveDnAvailable[g, i])
+            df_spnup_DAC.at[i, g]  = value(instance.SpinningReserveUpAvailable[g, i])
+            df_nsr_DAC.at[i, g]    = value(instance.NonSpinningReserveAvailable[g, i])
+
+        for g in instance.ThermalGenerators_commit:
+            df_dispatch_up_DAC.at[i, g] = value(instance.DispatchLimitsUpper[g, i])
+
+        for c in df_cost_DAC.columns:
+            if c is 'TotalProductionCost':
+                tmp = 0
+                for g in instance.ThermalGenerators:
+                    tmp = tmp + value(instance.ProductionCost[g, i])
+                # df_cost.at[i, c] = sum(value(instance.ProductionCost[g, i]) for g in instance.ThermalGenerators)
+            elif c is 'TotalFixedCost':
+                # df_cost.at[i, c] = sum(value(instance.StartupCost[g, i] + instance.ShutdownCost[g, i]) for g in instance.ThermalGenerators)
+                tmp = 0
+                for g in instance.ThermalGenerators:
+                    tmp = tmp + value(instance.StartupCost[g, i] + instance.ShutdownCost[g, i])
+            elif c is 'TotalCurtailmentCost':
+                # df_cost.at[i, c] = sum(value(instance.BusVOLL[b]*instance.BusCurtailment[b,i]*instance.IntervalHour) for b in instance.LoadBuses)
+                tmp = 0
+                for b in instance.LoadBuses:
+                    tmp = tmp + value(instance.BusVOLL[b]*instance.BusCurtailment[b,i]*instance.IntervalHour)
+            elif c is 'TotalReserveShortageCost':
+                tmp = value(
+                    instance.SpinningReserveUpShortage[i] * 2000 + 
+                    instance.RegulatingReserveUpShortage[i] * 5500 + 
+                    instance.RegulatingReserveDnShortage[i] * 5500 + 
+                    instance.NonSpinningReserveShortage[i] * 2000 # Let's use shortage cost of spinning reserve
+                )*value(instance.IntervalHour)
+            df_cost_DAC.at[i, c] = tmp
+
+        for c in df_imba_DAC.columns:
+            tmp = getattr(instance, c)
+            df_imba_DAC.loc[i, c] = value(tmp[i])
+
+    df_power_mean_DAC = (df_power_start_DAC + df_power_end_DAC)/2
+
+    # Results container for RTED
     df_power_start = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_power_end   = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
     df_powermax    = MyDataFrame(0.0, index=df_genfor_RTD.index, columns=dfs.df_gen.index.tolist())
@@ -1644,22 +1708,36 @@ def summergo_uced(casename, scenarioname):
 
     flag_write = False
     if flag_write:
-        with pd.ExcelWriter('df_RTD.xlsx') as writer:
+        with pd.ExcelWriter('df_DAC.' + scenario + '.xlsx') as writer:
+            df_power_mean_DAC.to_excel(writer, sheet_name='power_mean')
+            df_power_end_DAC.to_excel(writer, sheet_name='power_end')
+            df_uniton_DAC.to_excel(writer, sheet_name='uniton')
+            df_regup_DAC.to_excel(writer, sheet_name='regup')
+            df_regdn_DAC.to_excel(writer, sheet_name='regdn')
+            df_nsr_DAC.to_excel(writer, sheet_name='nsr')
+            df_powermax_DAC.to_excel(writer, sheet_name='powermax')
+            df_dispatch_up_DAC.to_excel(writer, sheet_name='dispatch_up')
+            df_cost_DAC.to_excel(writer, sheet_name='cost')
+            df_imba_DAC.to_excel(writer, sheet_name='imbalance')
+
+        with pd.ExcelWriter('df_RTD.' + scenario + '.xlsx') as writer:
             df_power_mean.to_excel(writer, sheet_name='power_mean')
             df_power_end.to_excel(writer, sheet_name='power_end')
             df_uniton.to_excel(writer, sheet_name='uniton')
             df_regup.to_excel(writer, sheet_name='regup')
+            df_regdn.to_excel(writer, sheet_name='regdn')
             df_nsr.to_excel(writer, sheet_name='nsr')
             df_powermax.to_excel(writer, sheet_name='powermax')
             df_dispatch_up.to_excel(writer, sheet_name='dispatch_up')
             df_cost.to_excel(writer, sheet_name='cost')
             df_imba.to_excel(writer, sheet_name='imbalance')
 
-        with pd.ExcelWriter('df_RTC.xlsx') as writer:
+        with pd.ExcelWriter('df_RTC.' + scenario + '.xlsx') as writer:
             df_power_mean_RTC.to_excel(writer, sheet_name='power_mean')
             df_power_end_RTC.to_excel(writer, sheet_name='power_end')
             df_uniton_RTC.to_excel(writer, sheet_name='uniton')
             df_regup_RTC.to_excel(writer, sheet_name='regup')
+            df_regdn_RTC.to_excel(writer, sheet_name='regdn')
             df_nsr_RTC.to_excel(writer, sheet_name='nsr')
             df_powermax_RTC.to_excel(writer, sheet_name='powermax')
             df_dispatch_up_RTC.to_excel(writer, sheet_name='dispatch_up')
